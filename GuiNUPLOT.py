@@ -1,4 +1,4 @@
-# Gnuplot
+# Gnuplot GUI Develop S
 import sys
 import os
 import subprocess
