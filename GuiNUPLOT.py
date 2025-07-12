@@ -268,7 +268,7 @@ class GnuplotGUIY2Axis(QMainWindow):
         layout.addWidget(self.vector_headsize_input, 2, 1)
         layout.addWidget(QLabel("Length Scale:"), 3, 0)
         self.vector_length_scale_spinbox = QDoubleSpinBox()
-        self.vector_length_scale_spinbox.setRange(0.01, 100.0)
+        self.vector_length_scale_spinbox.setRange(0.01, 10000000.0)
         self.vector_length_scale_spinbox.setValue(1.0)
         self.vector_length_scale_spinbox.setSingleStep(0.1)
         self.vector_length_scale_spinbox.setDecimals(2)
