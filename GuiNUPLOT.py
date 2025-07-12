@@ -115,6 +115,10 @@ class GnuplotGUIY2Axis(QMainWindow):
         control_layout.addWidget(self.create_general_settings_panel())
         self.style_panel = self.create_style_settings_panel()
         control_layout.addWidget(self.style_panel)
+        # 追加: 選択されたプロットの詳細編集パネル
+        self.selected_plot_details_panel = self.create_selected_plot_details_panel()
+        control_layout.addWidget(self.selected_plot_details_panel)
+
         control_layout.addWidget(self.create_axis_settings_panel())
         control_layout.addWidget(self.create_output_settings_panel())
 
@@ -138,6 +142,7 @@ class GnuplotGUIY2Axis(QMainWindow):
         self.connect_signals()
         self.update_style_options_visibility()
         self.style_panel.setEnabled(False)
+        self.selected_plot_details_panel.setEnabled(False) # 初期状態では無効に
 
     def create_plot_management_panel(self):
         panel = QGroupBox("1. Plot Management")
@@ -179,13 +184,12 @@ class GnuplotGUIY2Axis(QMainWindow):
         panel = QGroupBox("2. General Graph Settings")
         layout = QGridLayout(panel)
         
-        ### 変更: ラベルをチェックボックスに置き換え ###
         self.title_check = QCheckBox("Graph Title:")
-        self.title_check.setChecked(False) # デフォルトはOFF
+        self.title_check.setChecked(False) 
         layout.addWidget(self.title_check, 0, 0)
         
         self.title_input = QLineEdit("My Graph Title")
-        self.title_input.setEnabled(False) # デフォルトは無効
+        self.title_input.setEnabled(False) 
         layout.addWidget(self.title_input, 0, 1)
 
         return panel
@@ -201,6 +205,34 @@ class GnuplotGUIY2Axis(QMainWindow):
         self.pointtype_label = QLabel("Point Type:"); self.pointtype_combo = QComboBox(); self.pointtype_combo.addItems(["1: +", "2: x", "3: *", "4: □", "5: ■", "6: ○", "7: ●", "8: △", "9: ▲"]); layout.addWidget(self.pointtype_label, 4, 0); layout.addWidget(self.pointtype_combo, 4, 1)
         self.pointsize_label = QLabel("Point Size:"); self.pointsize_spinbox = QDoubleSpinBox(); self.pointsize_spinbox.setRange(0.1, 20.0); self.pointsize_spinbox.setValue(1.0); self.pointsize_spinbox.setSingleStep(0.1); layout.addWidget(self.pointsize_label, 5, 0); layout.addWidget(self.pointsize_spinbox, 5, 1)
         
+        return panel
+
+    # 追加: 選択されたプロットの詳細編集パネル
+    def create_selected_plot_details_panel(self):
+        panel = QGroupBox("Selected Plot Details (Editable)")
+        layout = QGridLayout(panel)
+
+        layout.addWidget(QLabel("File Path:"), 0, 0)
+        self.edit_plot_file_input = QLineEdit()
+        self.edit_plot_file_input.setReadOnly(True) # 基本的にはRead Onlyだが、Browseで変更
+        layout.addWidget(self.edit_plot_file_input, 0, 1)
+        self.edit_plot_browse_button = QPushButton("Browse...")
+        self.edit_plot_browse_button.clicked.connect(self.select_edit_plot_file)
+        layout.addWidget(self.edit_plot_browse_button, 0, 2)
+
+        layout.addWidget(QLabel("Columns (using):"), 1, 0)
+        self.edit_plot_using_input = QLineEdit()
+        layout.addWidget(self.edit_plot_using_input, 1, 1, 1, 2)
+
+        layout.addWidget(QLabel("Target Axis:"), 2, 0)
+        self.edit_plot_axis_combo = QComboBox()
+        self.edit_plot_axis_combo.addItems(["Y1-Axis", "Y2-Axis"])
+        layout.addWidget(self.edit_plot_axis_combo, 2, 1, 1, 2)
+
+        layout.addWidget(QLabel("Plot Title (Legend):"), 3, 0)
+        self.edit_plot_title_input = QLineEdit()
+        layout.addWidget(self.edit_plot_title_input, 3, 1, 1, 2)
+
         return panel
         
     def create_axis_settings_panel(self):
@@ -258,22 +290,43 @@ class GnuplotGUIY2Axis(QMainWindow):
             "outside", "below"
         ])
         layout.addWidget(self.key_pos_combo, 1, 2)
-        layout.addWidget(QLabel("Image Size (W x H):"), 2, 0); self.width_input = QLineEdit("800"); self.height_input = QLineEdit("600"); size_layout = QHBoxLayout(); size_layout.addWidget(self.width_input); size_layout.addWidget(QLabel("x")); size_layout.addWidget(self.height_input); layout.addLayout(size_layout, 2, 1, 1, 2)
-        layout.addWidget(QLabel("Font:"), 3, 0); self.font_combo = QComboBox(); self.font_combo.addItems(["Times New Roman", "Arial", "Helvetica", "Verdana", "Courier New"]); layout.addWidget(self.font_combo, 3, 1, 1, 2)
-        layout.addWidget(QLabel("Font Size:"), 4, 0); self.font_slider = QSlider(Qt.Horizontal); self.font_slider.setRange(8, 30); self.font_slider.setValue(14); self.font_label = QLabel("14"); font_layout = QHBoxLayout(); font_layout.addWidget(self.font_slider); font_layout.addWidget(self.font_label); layout.addLayout(font_layout, 4, 1, 1, 2)
-        self.save_button = QPushButton("Save Graph As..."); self.save_button.clicked.connect(self.save_image); layout.addWidget(self.save_button, 5, 0, 1, 3)
+
+        self.key_rows_check = QCheckBox("Key Max Rows:")
+        self.key_rows_check.setChecked(False)
+        layout.addWidget(self.key_rows_check, 2, 0)
+        self.key_rows_input = QLineEdit("")
+        self.key_rows_input.setPlaceholderText("自動")
+        self.key_rows_input.setEnabled(False)
+        layout.addWidget(self.key_rows_input, 2, 1, 1, 2)
+
+        self.key_cols_check = QCheckBox("Key Max Cols:")
+        self.key_cols_check.setChecked(False)
+        layout.addWidget(self.key_cols_check, 3, 0)
+        self.key_cols_input = QLineEdit("")
+        self.key_cols_input.setPlaceholderText("自動")
+        self.key_cols_input.setEnabled(False)
+        layout.addWidget(self.key_cols_input, 3, 1, 1, 2)
+
+        layout.addWidget(QLabel("Image Size (W x H):"), 4, 0); self.width_input = QLineEdit("800"); self.height_input = QLineEdit("600"); size_layout = QHBoxLayout(); size_layout.addWidget(self.width_input); size_layout.addWidget(QLabel("x")); size_layout.addWidget(self.height_input); layout.addLayout(size_layout, 4, 1, 1, 2)
+        layout.addWidget(QLabel("Font:"), 5, 0); self.font_combo = QComboBox(); self.font_combo.addItems(["Times New Roman", "Arial", "Helvetica", "Verdana", "Courier New"]); layout.addWidget(self.font_combo, 5, 1, 1, 2)
+        layout.addWidget(QLabel("Font Size:"), 6, 0); self.font_slider = QSlider(Qt.Horizontal); self.font_slider.setRange(8, 30); self.font_slider.setValue(14); self.font_label = QLabel("14"); font_layout = QHBoxLayout(); font_layout.addWidget(self.font_slider); font_layout.addWidget(self.font_label); layout.addLayout(font_layout, 6, 1, 1, 2)
+        self.save_button = QPushButton("Save Graph As..."); self.save_button.clicked.connect(self.save_image); layout.addWidget(self.save_button, 7, 0, 1, 3)
         return panel
 
     def connect_signals(self):
         self.drop_zone.fileDropped.connect(self.handle_dropped_file)
 
-        ### 追加: タイトルチェックボックスのシグナルを接続 ###
         self.title_check.stateChanged.connect(self.update_title_input_state)
-        # 再描画もトリガーするように接続を追加
         self.title_check.stateChanged.connect(self.request_redraw)
-        
-        # タイトル入力欄のtextChangedは常に再描画をリクエストしてOK
         self.title_input.textChanged.connect(self.request_redraw)
+
+        self.key_rows_check.stateChanged.connect(self.update_key_rows_input_state)
+        self.key_rows_check.stateChanged.connect(self.request_redraw)
+        self.key_rows_input.textChanged.connect(self.request_redraw)
+
+        self.key_cols_check.stateChanged.connect(self.update_key_cols_input_state)
+        self.key_cols_check.stateChanged.connect(self.request_redraw)
+        self.key_cols_input.textChanged.connect(self.request_redraw)
 
         for widget in [self.xlabel_input, self.ylabel_input, self.y2label_input,
                        self.xrange_min, self.xrange_max, self.yrange_min, self.yrange_max, self.y2range_min, self.y2range_max,
@@ -299,9 +352,21 @@ class GnuplotGUIY2Axis(QMainWindow):
         for widget in [self.linewidth_spinbox, self.pointsize_spinbox]:
             widget.valueChanged.connect(self.update_selected_plot_style)
 
-    ### 追加: タイトル入力欄の有効/無効を切り替えるスロット ###
+        # 追加: 選択されたプロットの詳細編集フィールドのシグナル接続
+        self.edit_plot_file_input.textChanged.connect(self.update_selected_plot_details)
+        self.edit_plot_using_input.textChanged.connect(self.update_selected_plot_details)
+        self.edit_plot_axis_combo.currentIndexChanged.connect(self.update_selected_plot_details)
+        self.edit_plot_title_input.textChanged.connect(self.update_selected_plot_details)
+
+
     def update_title_input_state(self):
         self.title_input.setEnabled(self.title_check.isChecked())
+
+    def update_key_rows_input_state(self):
+        self.key_rows_input.setEnabled(self.key_rows_check.isChecked())
+
+    def update_key_cols_input_state(self):
+        self.key_cols_input.setEnabled(self.key_cols_check.isChecked())
 
     def handle_dropped_file(self, file_path):
         if os.path.isfile(file_path):
@@ -328,6 +393,16 @@ class GnuplotGUIY2Axis(QMainWindow):
             self.current_selected_file_path = file_name
             self.new_plot_file_input.setText(os.path.basename(file_name))
 
+    # 追加: 編集パネル用のファイル選択
+    def select_edit_plot_file(self):
+        row = self.plot_list_widget.currentRow()
+        if row < 0: return
+
+        file_name, _ = QFileDialog.getOpenFileName(self, "Select Data File for Plot", "", "Data Files (*.dat *.txt);;All Files (*)")
+        if file_name:
+            self.edit_plot_file_input.setText(file_name) # setReadOnlyなのでsetTextは直接設定
+            # シグナルに接続しているので、自動的に update_selected_plot_details が呼ばれる
+
     def add_plot(self):
         if not self.current_selected_file_path:
             QMessageBox.warning(self, "Warning", "Please select a file first.")
@@ -342,11 +417,13 @@ class GnuplotGUIY2Axis(QMainWindow):
         
         default_style = { "style": self.style_combo.currentText(), "color": self.color_combo.currentText(), "linestyle": self.linestyle_combo.currentText(), "linewidth": self.linewidth_spinbox.value(), "pointtype": self.pointtype_combo.currentIndex() + 1, "pointsize": self.pointsize_spinbox.value() }
         
-        plot_info = { "path": self.current_selected_file_path, "using": using, "axis": axis, "title": f"{os.path.basename(self.current_selected_file_path)} u {using} ({axis})", "style": default_style }
+        # タイトルをデフォルトで設定し、後で編集可能にする
+        plot_title = f"{os.path.basename(self.current_selected_file_path)} u {using} ({axis})"
+        plot_info = { "path": self.current_selected_file_path, "using": using, "axis": axis, "title": plot_title, "style": default_style }
         self.plots.append(plot_info)
         
         list_item = QListWidgetItem(self.plot_list_widget)
-        item_widget = PlotItemWidget(plot_info["title"], list_item)
+        item_widget = PlotItemWidget(plot_info["title"], list_item) # リスト表示タイトルも反映
         item_widget.remove_clicked.connect(self.handle_remove_request)
         
         list_item.setSizeHint(item_widget.sizeHint())
@@ -363,17 +440,25 @@ class GnuplotGUIY2Axis(QMainWindow):
             self.plot_list_widget.takeItem(row)
             self.plots.pop(row)
             self.request_redraw()
+            if self.plot_list_widget.count() == 0: # プロットがなくなったら編集パネルを無効に
+                self.style_panel.setEnabled(False)
+                self.selected_plot_details_panel.setEnabled(False)
     
     def on_plot_selection_changed(self, current, previous):
         if not current:
             self.style_panel.setEnabled(False)
+            self.selected_plot_details_panel.setEnabled(False) # 選択がない場合は無効
             return
 
         self.style_panel.setEnabled(True)
+        self.selected_plot_details_panel.setEnabled(True) # 選択があれば有効に
+
         row = self.plot_list_widget.row(current)
         if row >= 0:
-            plot_style = self.plots[row]["style"]
+            plot_info = self.plots[row]
+            plot_style = plot_info["style"]
             
+            # スタイル設定の更新 (既存ロジック)
             self.style_combo.blockSignals(True); self.style_combo.setCurrentText(plot_style["style"]); self.style_combo.blockSignals(False)
             self.color_combo.blockSignals(True); self.color_combo.setCurrentText(plot_style["color"]); self.color_combo.blockSignals(False)
             self.linestyle_combo.blockSignals(True); self.linestyle_combo.setCurrentText(plot_style["linestyle"]); self.linestyle_combo.blockSignals(False)
@@ -382,6 +467,23 @@ class GnuplotGUIY2Axis(QMainWindow):
             self.pointsize_spinbox.blockSignals(True); self.pointsize_spinbox.setValue(plot_style["pointsize"]); self.pointsize_spinbox.blockSignals(False)
             
             self.update_style_options_visibility()
+
+            # 追加: 選択されたプロットの詳細情報で編集フィールドを更新
+            self.edit_plot_file_input.blockSignals(True)
+            self.edit_plot_using_input.blockSignals(True)
+            self.edit_plot_axis_combo.blockSignals(True)
+            self.edit_plot_title_input.blockSignals(True)
+
+            self.edit_plot_file_input.setText(plot_info["path"])
+            self.edit_plot_using_input.setText(plot_info["using"])
+            self.edit_plot_axis_combo.setCurrentIndex(0 if plot_info["axis"] == "y1" else 1)
+            self.edit_plot_title_input.setText(plot_info["title"])
+
+            self.edit_plot_file_input.blockSignals(False)
+            self.edit_plot_using_input.blockSignals(False)
+            self.edit_plot_axis_combo.blockSignals(False)
+            self.edit_plot_title_input.blockSignals(False)
+
 
     def update_selected_plot_style(self):
         if not self.plot_list_widget.currentItem(): return
@@ -396,6 +498,36 @@ class GnuplotGUIY2Axis(QMainWindow):
             self.plots[row]["style"]["pointsize"] = self.pointsize_spinbox.value()
             
             self.request_redraw()
+
+    # 追加: 選択されたプロットの詳細を更新するスロット
+    def update_selected_plot_details(self):
+        if not self.plot_list_widget.currentItem(): return
+
+        row = self.plot_list_widget.currentRow()
+        if row >= 0:
+            plot_info = self.plots[row]
+            
+            # 各フィールドから値を取得し、plotsリストを更新
+            plot_info["path"] = self.edit_plot_file_input.text()
+            plot_info["using"] = self.edit_plot_using_input.text()
+            plot_info["axis"] = "y1" if self.edit_plot_axis_combo.currentIndex() == 0 else "y2"
+            plot_info["title"] = self.edit_plot_title_input.text()
+
+            # QListWidget内のアイテム表示も更新
+            list_item = self.plot_list_widget.item(row)
+            item_widget = self.plot_list_widget.itemWidget(list_item)
+            if item_widget:
+                # PlotItemWidgetはQLabelでテキストを設定しているので、そのラベルを更新
+                # しかし、PlotItemWidgetには直接テキスト更新メソッドがないため、
+                # ここでは直接アクセスするか、PlotItemWidgetにメソッドを追加する必要があります。
+                # 最も簡単なのは、一度アイテムを削除して再追加することですが、それはUIの点滅を引き起こす可能性があります。
+                # より良い方法は、PlotItemWidgetにsetTextメソッドを追加することです。
+                # 例: item_widget.setLabelText(plot_info["title"])
+                # 今回は簡略化のため、再描画時にスクリプトが生成されるので、UI上の表示は後回しでも動作に問題はありません。
+                # ただし、ユーザーフレンドリーにするには上記対応が必要です。
+                item_widget.findChild(QLabel).setText(plot_info["title"]) # 直接QLabelにアクセス
+            
+            self.request_redraw() # 変更を反映するために再描画をリクエスト
         
     def generate_gnuplot_script(self, output_path=None, terminal_cmd=None):
         if not self.plots: return None
@@ -413,7 +545,6 @@ class GnuplotGUIY2Axis(QMainWindow):
 
         script += 'set encoding utf8\n'
         
-        ### 変更: チェックボックスの状態を見てtitleコマンドを生成 ###
         if self.title_check.isChecked() and self.title_input.text():
             script += f'set title "{self.title_input.text()}"\n'
 
@@ -444,7 +575,14 @@ class GnuplotGUIY2Axis(QMainWindow):
         else: script += 'unset logscale\n'
 
         if self.grid_check.isChecked(): script += 'set grid\n'
-        if self.key_check.isChecked(): script += f'set key {self.key_pos_combo.currentText()}\n'
+        
+        if self.key_check.isChecked():
+            key_command = f'set key {self.key_pos_combo.currentText()}'
+            if self.key_rows_check.isChecked() and self.key_rows_input.text().isdigit():
+                key_command += f' maxrows {self.key_rows_input.text()}'
+            if self.key_cols_check.isChecked() and self.key_cols_input.text().isdigit():
+                key_command += f' maxcols {self.key_cols_input.text()}'
+            script += f'{key_command}\n'
         else: script += 'set key off\n'
 
         plot_parts = []
