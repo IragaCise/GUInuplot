@@ -87,6 +87,21 @@ class PlotItemWidget(QWidget):
         layout.addWidget(remove_button)
         self.setLayout(layout)
 
+class LegendItemWidget(QWidget):
+    title_changed = Signal(str)
+
+    def __init__(self, text: str):
+        super().__init__()
+        layout = QHBoxLayout()
+        layout.setContentsMargins(5, 3, 5, 3)
+        layout.setSpacing(5)
+
+        self.title_edit = QLineEdit(text)
+        self.title_edit.setToolTip("プロットの凡例名を編集します")
+        self.title_edit.textChanged.connect(self.title_changed.emit)
+
+        layout.addWidget(self.title_edit)
+        self.setLayout(layout)
 
 class GnuplotGUIY2Axis(QMainWindow):
     def __init__(self):
@@ -122,6 +137,7 @@ class GnuplotGUIY2Axis(QMainWindow):
         
         control_layout.addWidget(self.create_mode_selection_panel())
         control_layout.addWidget(self.create_plot_management_panel())
+        control_layout.addWidget(self.create_legend_settings_panel())
         control_layout.addWidget(self.create_general_settings_panel())
         self.style_panel = self.create_style_settings_panel()
         control_layout.addWidget(self.style_panel)
@@ -216,8 +232,35 @@ class GnuplotGUIY2Axis(QMainWindow):
         panel_layout.addWidget(add_group)
         return panel
 
+    def create_legend_settings_panel(self):
+        panel = QGroupBox("2. Legend Settings")
+        layout = QGridLayout(panel)
+
+        layout.addWidget(QLabel("Legend Titles:"), 0, 0, 1, 3)
+        self.legend_list_widget = QListWidget()
+        self.legend_list_widget.setFixedHeight(120)
+        layout.addWidget(self.legend_list_widget, 1, 0, 1, 3)
+
+        self.key_check = QCheckBox("Show Legend (key)")
+        self.key_check.setChecked(True)
+        layout.addWidget(self.key_check, 2, 0)
+
+        self.key_pos_combo = QComboBox()
+        self.key_pos_combo.addItems(["default", "above", "top left", "top center", "top right", "bottom left", "bottom center", "bottom right", "left center", "right center", "center", "outside", "below"])
+        layout.addWidget(self.key_pos_combo, 2, 1, 1, 2)
+
+        layout.addWidget(QLabel("Max Columns:"), 3, 0)
+        self.key_maxcols_spinbox = QSpinBox()
+        self.key_maxcols_spinbox.setMinimum(1)
+        self.key_maxcols_spinbox.setValue(1)
+        self.key_maxcols_spinbox.setToolTip("凡例の最大の列数を指定します")
+        layout.addWidget(self.key_maxcols_spinbox, 3, 1, 1, 2)
+        
+        self.toggle_key_options()
+        return panel
+
     def create_general_settings_panel(self):
-        panel = QGroupBox("2. General Graph Settings")
+        panel = QGroupBox("3. General Graph Settings")
         layout = QGridLayout(panel)
         self.title_check = QCheckBox("Graph Title:")
         self.title_check.setChecked(False)
@@ -228,7 +271,7 @@ class GnuplotGUIY2Axis(QMainWindow):
         return panel
 
     def create_style_settings_panel(self):
-        panel = QGroupBox("3. Style Settings (for selected plot)")
+        panel = QGroupBox("4. Style Settings (for selected plot)")
         layout = QVBoxLayout(panel)
         self.normal_style_group = QGroupBox("Plot Style")
         self.normal_style_group.setCheckable(False)
@@ -303,7 +346,7 @@ class GnuplotGUIY2Axis(QMainWindow):
         return group
 
     def create_axis_settings_panel(self):
-        panel = QGroupBox("4. Axis Settings")
+        panel = QGroupBox("5. Axis Settings")
         panel_layout = QVBoxLayout(panel)
         self.axis_tabs = QTabWidget()
         self.axis_tabs.addTab(self.create_xaxis_tab(), "X-Axis")
@@ -421,7 +464,7 @@ class GnuplotGUIY2Axis(QMainWindow):
         return tab
         
     def create_view_settings_panel(self):
-        panel = QGroupBox("4.1 View & Map Settings (3D)")
+        panel = QGroupBox("5.1 View & Map Settings (3D)")
         layout = QGridLayout(panel)
         layout.addWidget(QLabel("Rotate X:"), 0, 0)
         self.view_rot_x_slider = QSlider(Qt.Horizontal)
@@ -443,30 +486,23 @@ class GnuplotGUIY2Axis(QMainWindow):
         return panel
 
     def create_output_settings_panel(self):
-        panel = QGroupBox("5. Output Settings")
+        panel = QGroupBox("6. Output Settings")
         layout = QVBoxLayout(panel)
         general_group = QGroupBox("General Output")
         general_layout = QGridLayout(general_group)
-        general_layout.addWidget(QLabel("Show Legend (key):"), 0, 0)
-        self.key_check = QCheckBox()
-        self.key_check.setChecked(True)
-        general_layout.addWidget(self.key_check, 0, 1)
-        self.key_pos_combo = QComboBox()
-        self.key_pos_combo.addItems(["default", "above", "top left", "top center", "top right", "bottom left", "bottom center", "bottom right", "left center", "right center", "center", "outside", "below"])
-        general_layout.addWidget(self.key_pos_combo, 0, 2)
-        general_layout.addWidget(QLabel("Image Size (W x H):"), 1, 0)
+        general_layout.addWidget(QLabel("Image Size (W x H):"), 0, 0)
         self.width_input = QLineEdit("800")
         self.height_input = QLineEdit("600")
         size_layout_gen = QHBoxLayout()
         size_layout_gen.addWidget(self.width_input)
         size_layout_gen.addWidget(QLabel("x"))
         size_layout_gen.addWidget(self.height_input)
-        general_layout.addLayout(size_layout_gen, 1, 1, 1, 2)
-        general_layout.addWidget(QLabel("Font:"), 2, 0)
+        general_layout.addLayout(size_layout_gen, 0, 1, 1, 2)
+        general_layout.addWidget(QLabel("Font:"), 1, 0)
         self.font_combo = QComboBox()
         self.font_combo.addItems(["Times New Roman", "Arial", "Helvetica", "Verdana", "Courier New"])
-        general_layout.addWidget(self.font_combo, 2, 1, 1, 2)
-        general_layout.addWidget(QLabel("Font Size:"), 3, 0)
+        general_layout.addWidget(self.font_combo, 1, 1, 1, 2)
+        general_layout.addWidget(QLabel("Font Size:"), 2, 0)
         self.font_slider = QSlider(Qt.Horizontal)
         self.font_slider.setRange(8, 30)
         self.font_slider.setValue(14)
@@ -474,7 +510,7 @@ class GnuplotGUIY2Axis(QMainWindow):
         font_layout = QHBoxLayout()
         font_layout.addWidget(self.font_slider)
         font_layout.addWidget(self.font_label)
-        general_layout.addLayout(font_layout, 3, 1, 1, 2)
+        general_layout.addLayout(font_layout, 2, 1, 1, 2)
         
         cb_group = QGroupBox("Color Box Settings")
         cb_layout = QGridLayout(cb_group)
@@ -556,8 +592,12 @@ class GnuplotGUIY2Axis(QMainWindow):
         for widget in [self.xrange_check, self.yrange_check, self.y2range_check, self.zrange_check,
                        self.xtics_check, self.ytics_check, self.ztics_check, self.y2tics_offset_check,
                        self.logscale_x_check, self.logscale_y_check, self.logscale_y2_check, self.logscale_z_check,
-                       self.grid_check, self.key_check, self.pm3d_check]:
+                       self.grid_check, self.pm3d_check]:
             widget.stateChanged.connect(self.request_redraw)
+
+        self.key_check.stateChanged.connect(self.toggle_key_options)
+        self.key_check.stateChanged.connect(self.request_redraw)
+        self.key_maxcols_spinbox.valueChanged.connect(self.request_redraw)
 
         self.colorbar_check.stateChanged.connect(self.toggle_colorbar_options)
         self.colorbar_check.stateChanged.connect(self.request_redraw)
@@ -584,6 +624,12 @@ class GnuplotGUIY2Axis(QMainWindow):
         self.vector_nohead_check.stateChanged.connect(self.update_selected_plot_style)
         self.vector_headsize_input.textChanged.connect(self.update_selected_plot_style)
         self.vector_normalize_check.stateChanged.connect(self.update_selected_plot_style)
+
+    def toggle_key_options(self):
+        is_enabled = self.key_check.isChecked()
+        self.key_pos_combo.setEnabled(is_enabled)
+        self.key_maxcols_spinbox.setEnabled(is_enabled)
+        self.legend_list_widget.setEnabled(is_enabled)
 
     def toggle_colorbar_options(self):
         is_enabled = self.colorbar_check.isChecked()
@@ -614,6 +660,7 @@ class GnuplotGUIY2Axis(QMainWindow):
         
         self.plots.clear()
         self.plot_list_widget.clear()
+        self.legend_list_widget.clear()
         is_3d = self.plot_mode_combo.currentIndex() == 1
         self.current_mode = "3d" if is_3d else "2d"
         self.target_axis_label.setVisible(not is_3d)
@@ -705,20 +752,39 @@ class GnuplotGUIY2Axis(QMainWindow):
             plot_info["title"] = f"{os.path.basename(self.current_selected_file_path)} u {using}"
 
         self.plots.append(plot_info)
+
+        # Add to plot list (display only)
         list_item = QListWidgetItem(self.plot_list_widget)
-        item_widget = PlotItemWidget(plot_info["title"], list_item)
+        item_widget = PlotItemWidget(f"{os.path.basename(plot_info['path'])} (u {plot_info['using']})", list_item)
         item_widget.remove_clicked.connect(self.handle_remove_request)
         list_item.setSizeHint(item_widget.sizeHint())
         self.plot_list_widget.setItemWidget(list_item, item_widget)
         self.plot_list_widget.setCurrentItem(list_item)
+        
+        # Add to legend list (editable)
+        legend_list_item = QListWidgetItem(self.legend_list_widget)
+        legend_item_widget = LegendItemWidget(plot_info["title"])
+        current_plot_index = len(self.plots) - 1
+        legend_item_widget.title_changed.connect(
+            lambda new_title, index=current_plot_index: self.update_plot_title(index, new_title)
+        )
+        legend_list_item.setSizeHint(legend_item_widget.sizeHint())
+        self.legend_list_widget.setItemWidget(legend_list_item, legend_item_widget)
+
         self.new_plot_file_input.clear()
         self.current_selected_file_path = None
         self.request_redraw()
+
+    def update_plot_title(self, index, new_title):
+        if 0 <= index < len(self.plots):
+            self.plots[index]['title'] = new_title
+            self.request_redraw()
 
     def handle_remove_request(self, item):
         row = self.plot_list_widget.row(item)
         if row >= 0:
             self.plot_list_widget.takeItem(row)
+            self.legend_list_widget.takeItem(row)
             self.plots.pop(row)
             self.request_redraw()
 
@@ -822,8 +888,15 @@ class GnuplotGUIY2Axis(QMainWindow):
         if self.logscale_x_check.isChecked(): log_axes += "x"
         if self.logscale_y_check.isChecked(): log_axes += "y"
         if self.grid_check.isChecked(): script += 'set grid\n'
-        if self.key_check.isChecked(): script += f'set key {self.key_pos_combo.currentText()}\n'
-        else: script += 'set key off\n'
+        
+        if self.key_check.isChecked():
+            key_options = [self.key_pos_combo.currentText()]
+            maxcols = self.key_maxcols_spinbox.value()
+            if maxcols > 0:
+                key_options.append(f"maxcols {maxcols}")
+            script += f'set key {" ".join(key_options)}\n'
+        else:
+            script += 'set key off\n'
 
         if self.xtics_check.isChecked(): script += f'set xtics offset {self.xtics_xoffset.text() or "0"},{self.xtics_yoffset.text() or "0"}\n'
         if self.ytics_check.isChecked(): script += f'set ytics offset {self.ytics_xoffset.text() or "0"},{self.ytics_yoffset.text() or "0"}\n'
@@ -992,6 +1065,11 @@ class GnuplotGUIY2Axis(QMainWindow):
         settings = {
             'version': 1.0,
             'plot_mode': self.plot_mode_combo.currentIndex(),
+            'legend': {
+                'key_check': self.key_check.isChecked(),
+                'key_pos': self.key_pos_combo.currentText(),
+                'key_maxcols': self.key_maxcols_spinbox.value(),
+            },
             'general': {
                 'title_check': self.title_check.isChecked(),
                 'title_input': self.title_input.text(),
@@ -1043,8 +1121,6 @@ class GnuplotGUIY2Axis(QMainWindow):
                 'pm3d_check': self.pm3d_check.isChecked(),
             },
             'output': {
-                'key_check': self.key_check.isChecked(),
-                'key_pos': self.key_pos_combo.currentText(),
                 'width': self.width_input.text(),
                 'height': self.height_input.text(),
                 'font_name': self.font_combo.currentText(),
@@ -1089,6 +1165,12 @@ class GnuplotGUIY2Axis(QMainWindow):
             else:
                 self.style_combo.addItems(base_styles + ["steps"])
             self.update_column_input_ui()
+
+            s = settings.get('legend', {})
+            self.key_check.setChecked(s.get('key_check', True))
+            self.key_pos_combo.setCurrentText(s.get('key_pos', 'default'))
+            self.key_maxcols_spinbox.setValue(s.get('key_maxcols', 1))
+            self.toggle_key_options()
 
             s = settings.get('general', {})
             self.title_check.setChecked(s.get('title_check', False))
@@ -1142,8 +1224,6 @@ class GnuplotGUIY2Axis(QMainWindow):
             self.pm3d_check.setChecked(s.get('pm3d_check', True))
             
             s = settings.get('output', {})
-            self.key_check.setChecked(s.get('key_check', True))
-            self.key_pos_combo.setCurrentText(s.get('key_pos', 'default'))
             self.width_input.setText(s.get('width', '800'))
             self.height_input.setText(s.get('height', '600'))
             self.font_combo.setCurrentText(s.get('font_name', 'Times New Roman'))
@@ -1203,6 +1283,7 @@ class GnuplotGUIY2Axis(QMainWindow):
 
             self.plots.clear()
             self.plot_list_widget.clear()
+            self.legend_list_widget.clear()
 
             self.apply_settings(settings)
 
@@ -1221,4 +1302,3 @@ if __name__ == '__main__':
     window = GnuplotGUIY2Axis()
     window.show()
     sys.exit(app.exec())
-    # --- IGNORE ---
