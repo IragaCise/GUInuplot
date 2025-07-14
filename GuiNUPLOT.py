@@ -1,13 +1,14 @@
 import sys
 import os
 import subprocess
+import json
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QCheckBox, QFileDialog, QSlider,
     QGridLayout, QTextEdit, QComboBox, QListWidget, QMessageBox, QDoubleSpinBox,
     QTabWidget, QGroupBox, QScrollArea, QListWidgetItem, QSizePolicy, QSpinBox
 )
-from PySide6.QtGui import QFont, QPixmap
+from PySide6.QtGui import QFont, QPixmap, QAction
 from PySide6.QtCore import Qt, QTimer, Signal
 
 CREATE_NO_WINDOW = 0
@@ -107,6 +108,7 @@ class GnuplotGUIY2Axis(QMainWindow):
         self.init_ui()
 
     def init_ui(self):
+        self.create_menu_bar()
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         main_layout = QHBoxLayout(main_widget)
@@ -147,6 +149,27 @@ class GnuplotGUIY2Axis(QMainWindow):
         self.connect_signals()
         self.on_mode_changed()
         self.style_panel.setEnabled(False)
+
+    def create_menu_bar(self):
+        menu_bar = self.menuBar()
+        file_menu = menu_bar.addMenu("&File")
+
+        save_graph_action = QAction("Save Graph As...", self)
+        save_graph_action.setToolTip("Save the current graph to an image file (PNG, SVG, PDF).")
+        save_graph_action.triggered.connect(self.save_image)
+        file_menu.addAction(save_graph_action)
+
+        file_menu.addSeparator()
+
+        save_settings_action = QAction("Save Settings...", self)
+        save_settings_action.setToolTip("Save the current graph settings to a file.")
+        save_settings_action.triggered.connect(self.save_settings)
+        file_menu.addAction(save_settings_action)
+
+        load_settings_action = QAction("Load Settings...", self)
+        load_settings_action.setToolTip("Load graph settings from a file.")
+        load_settings_action.triggered.connect(self.load_settings)
+        file_menu.addAction(load_settings_action)
 
     def create_mode_selection_panel(self):
         panel = QGroupBox("Plot Mode")
@@ -274,7 +297,6 @@ class GnuplotGUIY2Axis(QMainWindow):
         self.vector_length_scale_spinbox.setDecimals(2)
         layout.addWidget(self.vector_length_scale_spinbox, 3, 1)
         
-        # ### 新規: ベクトル正規化のチェックボックス ###
         self.vector_normalize_check = QCheckBox("Normalize Vectors")
         self.vector_normalize_check.setToolTip("ベクトルの長さを1に正規化します（カラー値の式を使用）")
         layout.addWidget(self.vector_normalize_check, 4, 0, 1, 2)
@@ -506,11 +528,8 @@ class GnuplotGUIY2Axis(QMainWindow):
         size_layout_cb.addWidget(self.cb_size_h_spinbox)
         cb_layout.addLayout(size_layout_cb, 5, 1, 1, 2)
 
-        self.save_button = QPushButton("Save Graph As...")
-        self.save_button.clicked.connect(self.save_image)
         layout.addWidget(general_group)
         layout.addWidget(cb_group)
-        layout.addWidget(self.save_button)
         
         self.toggle_cb_size_controls()
         self.toggle_colorbar_options()
@@ -564,7 +583,6 @@ class GnuplotGUIY2Axis(QMainWindow):
             widget.valueChanged.connect(self.update_selected_plot_style)
         self.vector_nohead_check.stateChanged.connect(self.update_selected_plot_style)
         self.vector_headsize_input.textChanged.connect(self.update_selected_plot_style)
-        # ### 新規: 正規化チェックボックスのシグナル接続 ###
         self.vector_normalize_check.stateChanged.connect(self.update_selected_plot_style)
 
     def toggle_colorbar_options(self):
@@ -820,7 +838,8 @@ class GnuplotGUIY2Axis(QMainWindow):
             if has_y2 and self.logscale_y2_check.isChecked(): log_axes += "y2"
             plot_command = "plot"
         elif self.current_mode == '3d':
-            if self.zlabel_input.text(): script += f'set zlabel "{self.zlabel_input.text()}"\n'
+            if self.zlabel_input.text():
+                script += f'set zlabel "{self.zlabel_input.text()}" rotate by 90\n'
             if self.zrange_check.isChecked() and self.zrange_min.text() and self.zrange_max.text(): script += f'set zrange [{self.zrange_min.text()}:{self.zrange_max.text()}]\n'
             if self.ztics_check.isChecked(): script += f'set ztics offset {self.ztics_xoffset.text() or "0"},{self.ztics_yoffset.text() or "0"}\n'
             if self.logscale_z_check.isChecked(): log_axes += "z"
@@ -967,6 +986,230 @@ class GnuplotGUIY2Axis(QMainWindow):
                 QMessageBox.critical(self, "Gnuplot Error", f"Failed to save graph.\n\n{stderr}")
         except Exception as e:
             QMessageBox.critical(self, "Runtime Error", f"An error occurred.\n\n{e}")
+
+    def collect_settings(self):
+        """Collects all current UI settings into a dictionary."""
+        settings = {
+            'version': 1.0,
+            'plot_mode': self.plot_mode_combo.currentIndex(),
+            'general': {
+                'title_check': self.title_check.isChecked(),
+                'title_input': self.title_input.text(),
+            },
+            'xaxis': {
+                'label': self.xlabel_input.text(),
+                'range_check': self.xrange_check.isChecked(),
+                'range_min': self.xrange_min.text(),
+                'range_max': self.xrange_max.text(),
+                'tics_check': self.xtics_check.isChecked(),
+                'tics_xoffset': self.xtics_xoffset.text(),
+                'tics_yoffset': self.xtics_yoffset.text(),
+                'log_check': self.logscale_x_check.isChecked(),
+                'grid_check': self.grid_check.isChecked(),
+            },
+            'yaxis': {
+                'label': self.ylabel_input.text(),
+                'range_check': self.yrange_check.isChecked(),
+                'range_min': self.yrange_min.text(),
+                'range_max': self.yrange_max.text(),
+                'tics_check': self.ytics_check.isChecked(),
+                'tics_xoffset': self.ytics_xoffset.text(),
+                'tics_yoffset': self.ytics_yoffset.text(),
+                'log_check': self.logscale_y_check.isChecked(),
+            },
+            'y2axis': {
+                'label': self.y2label_input.text(),
+                'range_check': self.y2range_check.isChecked(),
+                'range_min': self.y2range_min.text(),
+                'range_max': self.y2range_max.text(),
+                'tics_check': self.y2tics_offset_check.isChecked(),
+                'tics_xoffset': self.y2tics_xoffset.text(),
+                'tics_yoffset': self.y2tics_yoffset.text(),
+                'log_check': self.logscale_y2_check.isChecked(),
+            },
+            'zaxis': {
+                'label': self.zlabel_input.text(),
+                'range_check': self.zrange_check.isChecked(),
+                'range_min': self.zrange_min.text(),
+                'range_max': self.zrange_max.text(),
+                'tics_check': self.ztics_check.isChecked(),
+                'tics_xoffset': self.ztics_xoffset.text(),
+                'tics_yoffset': self.ztics_yoffset.text(),
+                'log_check': self.logscale_z_check.isChecked(),
+            },
+            'view3d': {
+                'rot_x': self.view_rot_x_slider.value(),
+                'rot_z': self.view_rot_z_slider.value(),
+                'pm3d_check': self.pm3d_check.isChecked(),
+            },
+            'output': {
+                'key_check': self.key_check.isChecked(),
+                'key_pos': self.key_pos_combo.currentText(),
+                'width': self.width_input.text(),
+                'height': self.height_input.text(),
+                'font_name': self.font_combo.currentText(),
+                'font_size': self.font_slider.value(),
+            },
+            'colorbar': {
+                'check': self.colorbar_check.isChecked(),
+                'label': self.cblabel_input.text(),
+                'range_check': self.cbrange_check.isChecked(),
+                'range_min': self.cbrange_min.text(),
+                'range_max': self.cbrange_max.text(),
+                'size_check': self.cbsize_check.isChecked(),
+                'origin_x': self.cb_origin_x_spinbox.value(),
+                'origin_y': self.cb_origin_y_spinbox.value(),
+                'size_w': self.cb_size_w_spinbox.value(),
+                'size_h': self.cb_size_h_spinbox.value(),
+            }
+        }
+        return settings
+
+    def apply_settings(self, settings):
+        """Applies settings from a dictionary to the UI controls."""
+        all_widgets = self.findChildren(QWidget)
+        for widget in all_widgets:
+            widget.blockSignals(True)
+        
+        try:
+            new_mode_index = settings.get('plot_mode', 0)
+            self.plot_mode_combo.setCurrentIndex(new_mode_index)
+            is_3d = (new_mode_index == 1)
+            self.current_mode = "3d" if is_3d else "2d"
+            self.target_axis_label.setVisible(not is_3d)
+            self.new_plot_axis_combo.setVisible(not is_3d)
+            self.axis_tabs.setTabVisible(self.axis_tabs.indexOf(self.y2_axis_tab), not is_3d)
+            self.axis_tabs.setTabVisible(self.axis_tabs.indexOf(self.z_axis_tab), is_3d)
+            self.view_settings_panel.setVisible(is_3d)
+            self.pm3d_check.setVisible(is_3d)
+            self.style_combo.clear()
+            base_styles = ["lines", "points", "linespoints", "dots", "impulses"]
+            if is_3d:
+                self.style_combo.addItems(base_styles + ["pm3d"])
+            else:
+                self.style_combo.addItems(base_styles + ["steps"])
+            self.update_column_input_ui()
+
+            s = settings.get('general', {})
+            self.title_check.setChecked(s.get('title_check', False))
+            self.title_input.setText(s.get('title_input', ''))
+            self.update_title_input_state()
+
+            s = settings.get('xaxis', {})
+            self.xlabel_input.setText(s.get('label', 'X-Axis'))
+            self.xrange_check.setChecked(s.get('range_check', False))
+            self.xrange_min.setText(s.get('range_min', ''))
+            self.xrange_max.setText(s.get('range_max', ''))
+            self.xtics_check.setChecked(s.get('tics_check', False))
+            self.xtics_xoffset.setText(s.get('tics_xoffset', '0'))
+            self.xtics_yoffset.setText(s.get('tics_yoffset', '-1'))
+            self.logscale_x_check.setChecked(s.get('log_check', False))
+            self.grid_check.setChecked(s.get('grid_check', False))
+
+            s = settings.get('yaxis', {})
+            self.ylabel_input.setText(s.get('label', 'Y-Axis'))
+            self.yrange_check.setChecked(s.get('range_check', False))
+            self.yrange_min.setText(s.get('range_min', ''))
+            self.yrange_max.setText(s.get('range_max', ''))
+            self.ytics_check.setChecked(s.get('tics_check', False))
+            self.ytics_xoffset.setText(s.get('tics_xoffset', '-1'))
+            self.ytics_yoffset.setText(s.get('tics_yoffset', '0'))
+            self.logscale_y_check.setChecked(s.get('log_check', False))
+
+            s = settings.get('y2axis', {})
+            self.y2label_input.setText(s.get('label', 'Y2-Axis'))
+            self.y2range_check.setChecked(s.get('range_check', False))
+            self.y2range_min.setText(s.get('range_min', ''))
+            self.y2range_max.setText(s.get('range_max', ''))
+            self.y2tics_offset_check.setChecked(s.get('tics_check', False))
+            self.y2tics_xoffset.setText(s.get('tics_xoffset', '1'))
+            self.y2tics_yoffset.setText(s.get('tics_yoffset', '0'))
+            self.logscale_y2_check.setChecked(s.get('log_check', False))
+
+            s = settings.get('zaxis', {})
+            self.zlabel_input.setText(s.get('label', 'Z-Axis'))
+            self.zrange_check.setChecked(s.get('range_check', False))
+            self.zrange_min.setText(s.get('range_min', ''))
+            self.zrange_max.setText(s.get('range_max', ''))
+            self.ztics_check.setChecked(s.get('tics_check', False))
+            self.ztics_xoffset.setText(s.get('tics_xoffset', '0'))
+            self.ztics_yoffset.setText(s.get('tics_yoffset', '0'))
+            self.logscale_z_check.setChecked(s.get('log_check', False))
+
+            s = settings.get('view3d', {})
+            self.view_rot_x_slider.setValue(s.get('rot_x', 60))
+            self.view_rot_z_slider.setValue(s.get('rot_z', 30))
+            self.pm3d_check.setChecked(s.get('pm3d_check', True))
+            
+            s = settings.get('output', {})
+            self.key_check.setChecked(s.get('key_check', True))
+            self.key_pos_combo.setCurrentText(s.get('key_pos', 'default'))
+            self.width_input.setText(s.get('width', '800'))
+            self.height_input.setText(s.get('height', '600'))
+            self.font_combo.setCurrentText(s.get('font_name', 'Times New Roman'))
+            self.font_slider.setValue(s.get('font_size', 14))
+
+            s = settings.get('colorbar', {})
+            self.colorbar_check.setChecked(s.get('check', True))
+            self.cblabel_input.setText(s.get('label', 'Magnitude'))
+            self.cbrange_check.setChecked(s.get('range_check', False))
+            self.cbrange_min.setText(s.get('range_min', ''))
+            self.cbrange_max.setText(s.get('range_max', ''))
+            self.cbsize_check.setChecked(s.get('size_check', False))
+            self.cb_origin_x_spinbox.setValue(s.get('origin_x', 0.92))
+            self.cb_origin_y_spinbox.setValue(s.get('origin_y', 0.1))
+            self.cb_size_w_spinbox.setValue(s.get('size_w', 0.04))
+            self.cb_size_h_spinbox.setValue(s.get('size_h', 0.8))
+            self.toggle_colorbar_options()
+
+        finally:
+            all_widgets_after = self.findChildren(QWidget)
+            for widget in all_widgets_after:
+                widget.blockSignals(False)
+
+        self.request_redraw()
+
+    def save_settings(self):
+        """Saves the current settings to a JSON file."""
+        file_name, _ = QFileDialog.getSaveFileName(self, "Save Settings As", "", "JSON Files (*.json);;All Files (*)")
+        if not file_name:
+            return
+
+        settings = self.collect_settings()
+
+        try:
+            with open(file_name, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=4)
+            QMessageBox.information(self, "Success", f"Settings saved to {os.path.basename(file_name)}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save settings file.\n\n{e}")
+
+    def load_settings(self):
+        """Loads settings from a JSON file."""
+        if self.plots:
+            reply = QMessageBox.question(self, 'Load Settings',
+                                         "Loading settings will clear the current plot list and apply the new settings. Continue?",
+                                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.No:
+                return
+
+        file_name, _ = QFileDialog.getOpenFileName(self, "Load Settings File", "", "JSON Files (*.json);;All Files (*)")
+        if not file_name:
+            return
+
+        try:
+            with open(file_name, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+
+            self.plots.clear()
+            self.plot_list_widget.clear()
+
+            self.apply_settings(settings)
+
+            QMessageBox.information(self, "Success", f"Settings loaded from {os.path.basename(file_name)}")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load settings file.\n\n{e}")
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
