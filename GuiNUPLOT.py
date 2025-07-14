@@ -1221,3 +1221,4 @@ if __name__ == '__main__':
     window = GnuplotGUIY2Axis()
     window.show()
     sys.exit(app.exec())
+    # --- IGNORE ---
