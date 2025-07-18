@@ -106,7 +106,7 @@ class LegendItemWidget(QWidget):
 class GnuplotGUIY2Axis(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Gnuplot GUI Controller")
+        self.setWindowTitle("GUInuplot")
         self.setGeometry(100, 100, 1600, 950)
 
         self.plots = []
