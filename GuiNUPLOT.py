@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QCheckBox, QFileDialog, QSlider,
     QGridLayout, QTextEdit, QComboBox, QMessageBox, QDoubleSpinBox,
-    QTabWidget, QGroupBox, QScrollArea, QSizePolicy, QSpinBox
+    QTabWidget, QGroupBox, QScrollArea, QSizePolicy, QSpinBox, QInputDialog
 )
 from PySide6.QtGui import QFont, QPixmap, QAction
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -155,7 +155,6 @@ class PlotEditorWidget(QWidget):
         layout.addStretch(1)
 
     def load_info_to_ui(self):
-        """plot_infoの内容をUIウィジェットにロードする"""
         is_vector = self.plot_info.get("is_vector", False)
         plot_style = self.plot_info.get("style", {})
         vec_opts = plot_style.get("vector_options", {})
@@ -196,7 +195,6 @@ class PlotEditorWidget(QWidget):
         for widget in self.findChildren(QWidget): widget.blockSignals(False)
 
     def connect_signals(self):
-        """UI要素のシグナルをスロットに接続"""
         self.title_input.textChanged.connect(self.update_plot_info)
         self.title_input.textChanged.connect(self.titleChanged.emit)
         self.using_input.textChanged.connect(self.update_plot_info)
@@ -216,7 +214,6 @@ class PlotEditorWidget(QWidget):
         self.vector_normalize_check.stateChanged.connect(self.update_plot_info)
 
     def update_plot_info(self):
-        """UIから情報を読み取り、self.plot_infoを更新し、変更を通知する"""
         style_dict = self.plot_info["style"]
         is_vector = self.plot_info.get("is_vector", False)
         
@@ -225,10 +222,8 @@ class PlotEditorWidget(QWidget):
 
         if is_vector:
             style_dict["vector_options"] = {
-                "nohead": self.vector_nohead_check.isChecked(),
-                "head_style": self.vector_headstyle_combo.currentText(),
-                "head_size": self.vector_headsize_input.text(),
-                "length_scale": self.vector_length_scale_spinbox.value(),
+                "nohead": self.vector_nohead_check.isChecked(), "head_style": self.vector_headstyle_combo.currentText(),
+                "head_size": self.vector_headsize_input.text(), "length_scale": self.vector_length_scale_spinbox.value(),
                 "normalize": self.vector_normalize_check.isChecked()
             }
         else:
@@ -249,23 +244,20 @@ class PlotEditorWidget(QWidget):
         self.color_combo.setEnabled(not use_palette)
         self.color_value_input.setEnabled(use_palette)
 
-
 class GnuplotGUIY2Axis(QMainWindow):
-    def __init__(self):
-        super().__init__()
+    # (省略... __init__ から create_menu_bar の直前まで変更なし)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.setWindowTitle("GUInuplot (Integrated)")
         self.setGeometry(100, 100, 1600, 950)
-
         self.plots = []
         self.current_selected_file_path = None
         self.current_mode = "2d"
         self.column_spinboxes = []
         self.dashtype_map = {"Solid": 1, "Dashed": 2, "Dotted": 3, "Dash-Dot": 4}
-
         self.update_timer = QTimer(self)
         self.update_timer.setSingleShot(True)
         self.update_timer.timeout.connect(self.redraw_plot)
-
         self.init_ui()
 
     def init_ui(self):
@@ -273,14 +265,11 @@ class GnuplotGUIY2Axis(QMainWindow):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         main_layout = QHBoxLayout(main_widget)
-
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFixedWidth(580)
-
         control_panel = QWidget()
         self.control_layout = QVBoxLayout(control_panel)
-        
         self.control_layout.addWidget(self.create_mode_selection_panel())
         self.control_layout.addWidget(self.create_plot_management_panel())
         self.control_layout.addWidget(self.create_plot_tabs_panel())
@@ -289,29 +278,31 @@ class GnuplotGUIY2Axis(QMainWindow):
         self.view_settings_panel = self.create_view_settings_panel()
         self.control_layout.addWidget(self.view_settings_panel)
         self.control_layout.addWidget(self.create_output_settings_panel())
-
         self.control_layout.addWidget(QLabel("Gnuplot Command Preview:"))
         self.script_display = QTextEdit()
         self.script_display.setReadOnly(True)
         self.script_display.setFont(QFont("Courier New", 10))
         self.control_layout.addWidget(self.script_display)
-
         self.control_layout.addStretch(1)
         scroll_area.setWidget(control_panel)
-
         self.plot_label = QLabel("Please add a plot to begin.")
         self.plot_label.setAlignment(Qt.AlignCenter)
         self.plot_label.setStyleSheet("background-color: #ffffff;")
-
         main_layout.addWidget(scroll_area)
         main_layout.addWidget(self.plot_label, 1)
-
         self.connect_signals()
         self.on_mode_changed()
 
     def create_menu_bar(self):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("&File")
+
+        export_action = QAction("Export Project...", self)
+        export_action.setToolTip("Save PNG, .gp, and .c files into a new folder.")
+        export_action.triggered.connect(self.export_project)
+        file_menu.addAction(export_action)
+        
+        file_menu.addSeparator()
 
         save_graph_action = QAction("Save Graph As...", self)
         save_graph_action.setToolTip("Save the current graph to an image file (PNG, SVG, PDF).")
@@ -323,7 +314,6 @@ class GnuplotGUIY2Axis(QMainWindow):
         save_script_action.triggered.connect(self.save_gp_file)
         file_menu.addAction(save_script_action)
         
-        # ★ .cファイル保存のアクションを追加
         save_c_action = QAction("Save for C Language As (.c)...", self)
         save_c_action.setToolTip("Save commands as a C source file using popen.")
         save_c_action.triggered.connect(self.save_for_c)
@@ -340,9 +330,9 @@ class GnuplotGUIY2Axis(QMainWindow):
         load_settings_action.setToolTip("Load graph settings from a file.")
         load_settings_action.triggered.connect(self.load_settings)
         file_menu.addAction(load_settings_action)
-        
-    # (省略... create_mode_selection_panel から handle_tab_moved まで変更なし)
-    def create_mode_selection_panel(self):
+
+    # (省略... create_mode_selection_panel から save_for_c の直前まで変更なし)
+    def create_mode_selection_panel(self, *args, **kwargs):
         panel = QGroupBox("Plot Mode")
         layout = QHBoxLayout(panel)
         layout.addWidget(QLabel("Mode:"))
@@ -351,7 +341,7 @@ class GnuplotGUIY2Axis(QMainWindow):
         layout.addWidget(self.plot_mode_combo, 1)
         return panel
 
-    def create_plot_management_panel(self):
+    def create_plot_management_panel(self, *args, **kwargs):
         panel = QGroupBox("1. Add New Plot")
         add_layout = QGridLayout(panel)
         self.drop_zone = DropLabel()
@@ -380,7 +370,7 @@ class GnuplotGUIY2Axis(QMainWindow):
         add_layout.addWidget(add_plot_button, 5, 0, 1, 3)
         return panel
 
-    def create_plot_tabs_panel(self):
+    def create_plot_tabs_panel(self, *args, **kwargs):
         panel = QGroupBox("2. Current Plots (Edit in Tabs)")
         layout = QVBoxLayout(panel)
         self.plot_tabs = QTabWidget()
@@ -390,7 +380,7 @@ class GnuplotGUIY2Axis(QMainWindow):
         layout.addWidget(self.plot_tabs)
         return panel
 
-    def create_general_settings_panel(self):
+    def create_general_settings_panel(self, *args, **kwargs):
         panel = QGroupBox("3. General Graph Settings")
         layout = QGridLayout(panel)
         self.title_check = QCheckBox("Graph Title:")
@@ -401,7 +391,7 @@ class GnuplotGUIY2Axis(QMainWindow):
         layout.addWidget(self.title_input, 0, 1)
         return panel
 
-    def create_axis_settings_panel(self):
+    def create_axis_settings_panel(self, *args, **kwargs):
         panel = QGroupBox("4. Axis Settings")
         panel_layout = QVBoxLayout(panel)
         self.axis_tabs = QTabWidget()
@@ -414,145 +404,294 @@ class GnuplotGUIY2Axis(QMainWindow):
         panel_layout.addWidget(self.axis_tabs)
         return panel
 
-    def create_xaxis_tab(self):
-        tab = QWidget(); layout = QGridLayout(tab)
-        layout.addWidget(QLabel("X-Axis Label:"), 0, 0); self.xlabel_input = QLineEdit("X-Axis"); layout.addWidget(self.xlabel_input, 0, 1, 1, 2)
-        self.xrange_check = QCheckBox("xrange"); self.xrange_min = QLineEdit(); self.xrange_max = QLineEdit(); layout.addWidget(self.xrange_check, 1, 0); layout.addWidget(self.xrange_min, 1, 1); layout.addWidget(self.xrange_max, 1, 2)
-        self.xtics_check = QCheckBox("xtics offset"); self.xtics_xoffset = QLineEdit("0"); self.xtics_yoffset = QLineEdit("-1"); xtics_layout = QHBoxLayout(); xtics_layout.addWidget(self.xtics_xoffset); xtics_layout.addWidget(QLabel(",")); xtics_layout.addWidget(self.xtics_yoffset); layout.addWidget(self.xtics_check, 2, 0); layout.addLayout(xtics_layout, 2, 1, 1, 2)
-        self.logscale_x_check = QCheckBox("Log Scale (X-Axis)"); layout.addWidget(self.logscale_x_check, 3, 0, 1, 3)
-        self.grid_check = QCheckBox("Show Grid"); layout.addWidget(self.grid_check, 4, 0, 1, 3)
+    def create_xaxis_tab(self, *args, **kwargs):
+        tab = QWidget()
+        layout = QGridLayout(tab)
+        layout.addWidget(QLabel("X-Axis Label:"), 0, 0)
+        self.xlabel_input = QLineEdit("X-Axis")
+        layout.addWidget(self.xlabel_input, 0, 1, 1, 2)
+        self.xrange_check = QCheckBox("xrange")
+        self.xrange_min = QLineEdit()
+        self.xrange_max = QLineEdit()
+        layout.addWidget(self.xrange_check, 1, 0)
+        layout.addWidget(self.xrange_min, 1, 1)
+        layout.addWidget(self.xrange_max, 1, 2)
+        self.xtics_check = QCheckBox("xtics offset")
+        self.xtics_xoffset = QLineEdit("0")
+        self.xtics_yoffset = QLineEdit("-1")
+        xtics_layout = QHBoxLayout()
+        xtics_layout.addWidget(self.xtics_xoffset)
+        xtics_layout.addWidget(QLabel(","))
+        xtics_layout.addWidget(self.xtics_yoffset)
+        layout.addWidget(self.xtics_check, 2, 0)
+        layout.addLayout(xtics_layout, 2, 1, 1, 2)
+        self.logscale_x_check = QCheckBox("Log Scale (X-Axis)")
+        layout.addWidget(self.logscale_x_check, 3, 0, 1, 3)
+        self.grid_check = QCheckBox("Show Grid")
+        layout.addWidget(self.grid_check, 4, 0, 1, 3)
         return tab
 
-    def create_y1axis_tab(self):
-        tab = QWidget(); layout = QGridLayout(tab)
-        layout.addWidget(QLabel("Y-Axis Label:"), 0, 0); self.ylabel_input = QLineEdit("Y-Axis"); layout.addWidget(self.ylabel_input, 0, 1, 1, 2)
-        self.yrange_check = QCheckBox("yrange"); self.yrange_min = QLineEdit(); self.yrange_max = QLineEdit(); layout.addWidget(self.yrange_check, 1, 0); layout.addWidget(self.yrange_min, 1, 1); layout.addWidget(self.yrange_max, 1, 2)
-        self.ytics_check = QCheckBox("ytics offset"); self.ytics_xoffset = QLineEdit("-1"); self.ytics_yoffset = QLineEdit("0"); ytics_layout = QHBoxLayout(); ytics_layout.addWidget(self.ytics_xoffset); ytics_layout.addWidget(QLabel(",")); ytics_layout.addWidget(self.ytics_yoffset); layout.addWidget(self.ytics_check, 2, 0); layout.addLayout(ytics_layout, 2, 1, 1, 2)
-        self.logscale_y_check = QCheckBox("Log Scale (Y-Axis)"); layout.addWidget(self.logscale_y_check, 3, 0, 1, 3)
+    def create_y1axis_tab(self, *args, **kwargs):
+        tab = QWidget()
+        layout = QGridLayout(tab)
+        layout.addWidget(QLabel("Y-Axis Label:"), 0, 0)
+        self.ylabel_input = QLineEdit("Y-Axis")
+        layout.addWidget(self.ylabel_input, 0, 1, 1, 2)
+        self.yrange_check = QCheckBox("yrange")
+        self.yrange_min = QLineEdit()
+        self.yrange_max = QLineEdit()
+        layout.addWidget(self.yrange_check, 1, 0)
+        layout.addWidget(self.yrange_min, 1, 1)
+        layout.addWidget(self.yrange_max, 1, 2)
+        self.ytics_check = QCheckBox("ytics offset")
+        self.ytics_xoffset = QLineEdit("-1")
+        self.ytics_yoffset = QLineEdit("0")
+        ytics_layout = QHBoxLayout()
+        ytics_layout.addWidget(self.ytics_xoffset)
+        ytics_layout.addWidget(QLabel(","))
+        ytics_layout.addWidget(self.ytics_yoffset)
+        layout.addWidget(self.ytics_check, 2, 0)
+        layout.addLayout(ytics_layout, 2, 1, 1, 2)
+        self.logscale_y_check = QCheckBox("Log Scale (Y-Axis)")
+        layout.addWidget(self.logscale_y_check, 3, 0, 1, 3)
         return tab
 
-    def create_y2axis_tab(self):
-        tab = QWidget(); layout = QGridLayout(tab)
-        layout.addWidget(QLabel("Y2-Axis Label:"), 0, 0); self.y2label_input = QLineEdit("Y2-Axis"); layout.addWidget(self.y2label_input, 0, 1, 1, 2)
-        self.y2range_check = QCheckBox("y2range"); self.y2range_min = QLineEdit(); self.y2range_max = QLineEdit(); layout.addWidget(self.y2range_check, 1, 0); layout.addWidget(self.y2range_min, 1, 1); layout.addWidget(self.y2range_max, 1, 2)
-        self.y2tics_offset_check = QCheckBox("y2tics offset"); self.y2tics_xoffset = QLineEdit("1"); self.y2tics_yoffset = QLineEdit("0"); y2tics_layout = QHBoxLayout(); y2tics_layout.addWidget(self.y2tics_xoffset); y2tics_layout.addWidget(QLabel(",")); y2tics_layout.addWidget(self.y2tics_yoffset); layout.addWidget(self.y2tics_offset_check, 2, 0); layout.addLayout(y2tics_layout, 2, 1, 1, 2)
-        self.logscale_y2_check = QCheckBox("Log Scale (Y2-Axis)"); layout.addWidget(self.logscale_y2_check, 3, 0, 1, 3)
+    def create_y2axis_tab(self, *args, **kwargs):
+        tab = QWidget()
+        layout = QGridLayout(tab)
+        layout.addWidget(QLabel("Y2-Axis Label:"), 0, 0)
+        self.y2label_input = QLineEdit("Y2-Axis")
+        layout.addWidget(self.y2label_input, 0, 1, 1, 2)
+        self.y2range_check = QCheckBox("y2range")
+        self.y2range_min = QLineEdit()
+        self.y2range_max = QLineEdit()
+        layout.addWidget(self.y2range_check, 1, 0)
+        layout.addWidget(self.y2range_min, 1, 1)
+        layout.addWidget(self.y2range_max, 1, 2)
+        self.y2tics_offset_check = QCheckBox("y2tics offset")
+        self.y2tics_xoffset = QLineEdit("1")
+        self.y2tics_yoffset = QLineEdit("0")
+        y2tics_layout = QHBoxLayout()
+        y2tics_layout.addWidget(self.y2tics_xoffset)
+        y2tics_layout.addWidget(QLabel(","))
+        y2tics_layout.addWidget(self.y2tics_yoffset)
+        layout.addWidget(self.y2tics_offset_check, 2, 0)
+        layout.addLayout(y2tics_layout, 2, 1, 1, 2)
+        self.logscale_y2_check = QCheckBox("Log Scale (Y2-Axis)")
+        layout.addWidget(self.logscale_y2_check, 3, 0, 1, 3)
         return tab
-    
-    def create_zaxis_tab(self):
-        tab = QWidget(); layout = QGridLayout(tab)
-        layout.addWidget(QLabel("Z-Axis Label:"), 0, 0); self.zlabel_input = QLineEdit("Z-Axis"); layout.addWidget(self.zlabel_input, 0, 1, 1, 2)
-        self.zrange_check = QCheckBox("zrange"); self.zrange_min = QLineEdit(); self.zrange_max = QLineEdit(); layout.addWidget(self.zrange_check, 1, 0); layout.addWidget(self.zrange_min, 1, 1); layout.addWidget(self.zrange_max, 1, 2)
-        self.ztics_check = QCheckBox("ztics offset"); self.ztics_xoffset = QLineEdit("0"); self.ztics_yoffset = QLineEdit("0"); ztics_layout = QHBoxLayout(); ztics_layout.addWidget(self.ztics_xoffset); ztics_layout.addWidget(QLabel(",")); ztics_layout.addWidget(self.ztics_yoffset); layout.addWidget(self.ztics_check, 2, 0); layout.addLayout(ztics_layout, 2, 1, 1, 2)
-        self.logscale_z_check = QCheckBox("Log Scale (Z-Axis)"); layout.addWidget(self.logscale_z_check, 3, 0, 1, 3)
+
+    def create_zaxis_tab(self, *args, **kwargs):
+        tab = QWidget()
+        layout = QGridLayout(tab)
+        layout.addWidget(QLabel("Z-Axis Label:"), 0, 0)
+        self.zlabel_input = QLineEdit("Z-Axis")
+        layout.addWidget(self.zlabel_input, 0, 1, 1, 2)
+        self.zrange_check = QCheckBox("zrange")
+        self.zrange_min = QLineEdit()
+        self.zrange_max = QLineEdit()
+        layout.addWidget(self.zrange_check, 1, 0)
+        layout.addWidget(self.zrange_min, 1, 1)
+        layout.addWidget(self.zrange_max, 1, 2)
+        self.ztics_check = QCheckBox("ztics offset")
+        self.ztics_xoffset = QLineEdit("0")
+        self.ztics_yoffset = QLineEdit("0")
+        ztics_layout = QHBoxLayout()
+        ztics_layout.addWidget(self.ztics_xoffset)
+        ztics_layout.addWidget(QLabel(","))
+        ztics_layout.addWidget(self.ztics_yoffset)
+        layout.addWidget(self.ztics_check, 2, 0)
+        layout.addLayout(ztics_layout, 2, 1, 1, 2)
+        self.logscale_z_check = QCheckBox("Log Scale (Z-Axis)")
+        layout.addWidget(self.logscale_z_check, 3, 0, 1, 3)
         return tab
-        
-    def create_view_settings_panel(self):
-        panel = QGroupBox("5. View & Map Settings (3D)"); layout = QGridLayout(panel)
+
+    def create_view_settings_panel(self, *args, **kwargs):
+        panel = QGroupBox("5. View & Map Settings (3D)")
+        layout = QGridLayout(panel)
         layout.addWidget(QLabel("Rotate X:"), 0, 0)
-        self.view_rot_x_slider = QSlider(Qt.Horizontal); self.view_rot_x_slider.setRange(0, 180); self.view_rot_x_slider.setValue(60)
-        self.view_rot_x_label = QLabel("60"); layout.addWidget(self.view_rot_x_slider, 0, 1); layout.addWidget(self.view_rot_x_label, 0, 2)
+        self.view_rot_x_slider = QSlider(Qt.Horizontal)
+        self.view_rot_x_slider.setRange(0, 180)
+        self.view_rot_x_slider.setValue(60)
+        self.view_rot_x_label = QLabel("60")
+        layout.addWidget(self.view_rot_x_slider, 0, 1)
+        layout.addWidget(self.view_rot_x_label, 0, 2)
         layout.addWidget(QLabel("Rotate Z:"), 1, 0)
-        self.view_rot_z_slider = QSlider(Qt.Horizontal); self.view_rot_z_slider.setRange(0, 360); self.view_rot_z_slider.setValue(30)
-        self.view_rot_z_label = QLabel("30"); layout.addWidget(self.view_rot_z_slider, 1, 1); layout.addWidget(self.view_rot_z_label, 1, 2)
-        self.pm3d_check = QCheckBox("Enable pm3d (for surfaces)"); self.pm3d_check.setChecked(True); layout.addWidget(self.pm3d_check, 2, 0, 1, 3)
+        self.view_rot_z_slider = QSlider(Qt.Horizontal)
+        self.view_rot_z_slider.setRange(0, 360)
+        self.view_rot_z_slider.setValue(30)
+        self.view_rot_z_label = QLabel("30")
+        layout.addWidget(self.view_rot_z_slider, 1, 1)
+        layout.addWidget(self.view_rot_z_label, 1, 2)
+        self.pm3d_check = QCheckBox("Enable pm3d (for surfaces)")
+        self.pm3d_check.setChecked(True)
+        layout.addWidget(self.pm3d_check, 2, 0, 1, 3)
         return panel
 
-    def create_output_settings_panel(self):
-        panel = QGroupBox("6. Output Settings"); layout = QVBoxLayout(panel)
-        general_group = QGroupBox("General Output"); general_layout = QGridLayout(general_group)
-        general_layout.addWidget(QLabel("Image Size (W x H):"), 0, 0); self.width_input = QLineEdit("800"); self.height_input = QLineEdit("600"); size_layout_gen = QHBoxLayout(); size_layout_gen.addWidget(self.width_input); size_layout_gen.addWidget(QLabel("x")); size_layout_gen.addWidget(self.height_input); general_layout.addLayout(size_layout_gen, 0, 1, 1, 2)
-        general_layout.addWidget(QLabel("Font:"), 1, 0); self.font_combo = QComboBox(); self.font_combo.addItems(["Times New Roman", "Arial", "Helvetica", "Verdana", "Courier New"]); general_layout.addWidget(self.font_combo, 1, 1, 1, 2)
-        general_layout.addWidget(QLabel("Font Size:"), 2, 0); self.font_slider = QSlider(Qt.Horizontal); self.font_slider.setRange(8, 30); self.font_slider.setValue(14); self.font_label = QLabel("14"); font_layout = QHBoxLayout(); font_layout.addWidget(self.font_slider); font_layout.addWidget(self.font_label); general_layout.addLayout(font_layout, 2, 1, 1, 2)
-        
-        key_group = QGroupBox("Legend (Key) Settings"); key_layout = QGridLayout(key_group)
-        self.key_check = QCheckBox("Show Legend (key)"); self.key_check.setChecked(True); key_layout.addWidget(self.key_check, 0, 0, 1, 3)
+    def create_output_settings_panel(self, *args, **kwargs):
+        panel = QGroupBox("6. Output Settings")
+        layout = QVBoxLayout(panel)
+        general_group = QGroupBox("General Output")
+        general_layout = QGridLayout(general_group)
+        general_layout.addWidget(QLabel("Image Size (W x H):"), 0, 0)
+        self.width_input = QLineEdit("800")
+        self.height_input = QLineEdit("600")
+        size_layout_gen = QHBoxLayout()
+        size_layout_gen.addWidget(self.width_input)
+        size_layout_gen.addWidget(QLabel("x"))
+        size_layout_gen.addWidget(self.height_input)
+        general_layout.addLayout(size_layout_gen, 0, 1, 1, 2)
+        general_layout.addWidget(QLabel("Font:"), 1, 0)
+        self.font_combo = QComboBox()
+        self.font_combo.addItems(["Times New Roman", "Arial", "Helvetica", "Verdana", "Courier New"])
+        general_layout.addWidget(self.font_combo, 1, 1, 1, 2)
+        general_layout.addWidget(QLabel("Font Size:"), 2, 0)
+        self.font_slider = QSlider(Qt.Horizontal)
+        self.font_slider.setRange(8, 30)
+        self.font_slider.setValue(14)
+        self.font_label = QLabel("14")
+        font_layout = QHBoxLayout()
+        font_layout.addWidget(self.font_slider)
+        font_layout.addWidget(self.font_label)
+        general_layout.addLayout(font_layout, 2, 1, 1, 2)
+        key_group = QGroupBox("Legend (Key) Settings")
+        key_layout = QGridLayout(key_group)
+        self.key_check = QCheckBox("Show Legend (key)")
+        self.key_check.setChecked(True)
+        key_layout.addWidget(self.key_check, 0, 0, 1, 3)
         key_layout.addWidget(QLabel("Position:"), 1, 0)
-        self.key_pos_combo = QComboBox(); self.key_pos_combo.addItems(["default", "above", "top left", "top center", "top right", "bottom left", "bottom center", "bottom right", "left center", "right center", "center", "outside", "below"]); key_layout.addWidget(self.key_pos_combo, 1, 1, 1, 2)
+        self.key_pos_combo = QComboBox()
+        self.key_pos_combo.addItems(["default", "above", "top left", "top center", "top right", "bottom left", "bottom center", "bottom right", "left center", "right center", "center", "outside", "below"])
+        key_layout.addWidget(self.key_pos_combo, 1, 1, 1, 2)
         key_layout.addWidget(QLabel("Max Rows:"), 2, 0)
-        self.key_maxrows_spinbox = QSpinBox(); self.key_maxrows_spinbox.setMinimum(0); self.key_maxrows_spinbox.setToolTip("凡例の最大の行数を指定（0で自動）"); key_layout.addWidget(self.key_maxrows_spinbox, 2, 1, 1, 2)
+        self.key_maxrows_spinbox = QSpinBox()
+        self.key_maxrows_spinbox.setMinimum(0)
+        self.key_maxrows_spinbox.setToolTip("凡例の最大の行数を指定（0で自動）")
+        key_layout.addWidget(self.key_maxrows_spinbox, 2, 1, 1, 2)
         key_layout.addWidget(QLabel("Max Columns:"), 3, 0)
-        self.key_maxcols_spinbox = QSpinBox(); self.key_maxcols_spinbox.setMinimum(0); self.key_maxcols_spinbox.setToolTip("凡例の最大の列数を指定（0で自動）"); key_layout.addWidget(self.key_maxcols_spinbox, 3, 1, 1, 2)
-
-        cb_group = QGroupBox("Color Box Settings"); cb_layout = QGridLayout(cb_group)
-        self.colorbar_check = QCheckBox("Show Color Box"); self.colorbar_check.setChecked(True); cb_layout.addWidget(self.colorbar_check, 0, 0, 1, 3)
-        cb_layout.addWidget(QLabel("CB Label:"), 1, 0); self.cblabel_input = QLineEdit("Magnitude"); cb_layout.addWidget(self.cblabel_input, 1, 1, 1, 2)
-        self.cbrange_check = QCheckBox("Set CB Range"); cb_layout.addWidget(self.cbrange_check, 2, 0); self.cbrange_min = QLineEdit(); cb_layout.addWidget(self.cbrange_min, 2, 1); self.cbrange_max = QLineEdit(); cb_layout.addWidget(self.cbrange_max, 2, 2)
-        self.cbsize_check = QCheckBox("Customize Position/Size"); cb_layout.addWidget(self.cbsize_check, 3, 0, 1, 3)
-        cb_layout.addWidget(QLabel("Origin (x,y):"), 4, 0); origin_layout = QHBoxLayout(); self.cb_origin_x_spinbox = QDoubleSpinBox(); self.cb_origin_x_spinbox.setRange(0, 1); self.cb_origin_x_spinbox.setValue(0.92); self.cb_origin_x_spinbox.setSingleStep(0.01); self.cb_origin_x_spinbox.setDecimals(2); origin_layout.addWidget(self.cb_origin_x_spinbox); self.cb_origin_y_spinbox = QDoubleSpinBox(); self.cb_origin_y_spinbox.setRange(0, 1); self.cb_origin_y_spinbox.setValue(0.1); self.cb_origin_y_spinbox.setSingleStep(0.01); self.cb_origin_y_spinbox.setDecimals(2); origin_layout.addWidget(self.cb_origin_y_spinbox); cb_layout.addLayout(origin_layout, 4, 1, 1, 2)
-        cb_layout.addWidget(QLabel("Size (w,h):"), 5, 0); size_layout_cb = QHBoxLayout(); self.cb_size_w_spinbox = QDoubleSpinBox(); self.cb_size_w_spinbox.setRange(0.01, 0.5); self.cb_size_w_spinbox.setValue(0.04); self.cb_size_w_spinbox.setSingleStep(0.01); self.cb_size_w_spinbox.setDecimals(2); size_layout_cb.addWidget(self.cb_size_w_spinbox); self.cb_size_h_spinbox = QDoubleSpinBox(); self.cb_size_h_spinbox.setRange(0.01, 1.0); self.cb_size_h_spinbox.setValue(0.8); self.cb_size_h_spinbox.setSingleStep(0.01); self.cb_size_h_spinbox.setDecimals(2); size_layout_cb.addWidget(self.cb_size_h_spinbox); cb_layout.addLayout(size_layout_cb, 5, 1, 1, 2)
-
-        layout.addWidget(general_group); layout.addWidget(key_group); layout.addWidget(cb_group)
-        self.toggle_key_options(); self.toggle_cb_size_controls(); self.toggle_colorbar_options()
+        self.key_maxcols_spinbox = QSpinBox()
+        self.key_maxcols_spinbox.setMinimum(0)
+        self.key_maxcols_spinbox.setToolTip("凡例の最大の列数を指定（0で自動）")
+        key_layout.addWidget(self.key_maxcols_spinbox, 3, 1, 1, 2)
+        cb_group = QGroupBox("Color Box Settings")
+        cb_layout = QGridLayout(cb_group)
+        self.colorbar_check = QCheckBox("Show Color Box")
+        self.colorbar_check.setChecked(True)
+        cb_layout.addWidget(self.colorbar_check, 0, 0, 1, 3)
+        cb_layout.addWidget(QLabel("CB Label:"), 1, 0)
+        self.cblabel_input = QLineEdit("Magnitude")
+        cb_layout.addWidget(self.cblabel_input, 1, 1, 1, 2)
+        self.cbrange_check = QCheckBox("Set CB Range")
+        cb_layout.addWidget(self.cbrange_check, 2, 0)
+        self.cbrange_min = QLineEdit()
+        cb_layout.addWidget(self.cbrange_min, 2, 1)
+        self.cbrange_max = QLineEdit()
+        cb_layout.addWidget(self.cbrange_max, 2, 2)
+        self.cbsize_check = QCheckBox("Customize Position/Size")
+        cb_layout.addWidget(self.cbsize_check, 3, 0, 1, 3)
+        cb_layout.addWidget(QLabel("Origin (x,y):"), 4, 0)
+        origin_layout = QHBoxLayout()
+        self.cb_origin_x_spinbox = QDoubleSpinBox()
+        self.cb_origin_x_spinbox.setRange(0, 1)
+        self.cb_origin_x_spinbox.setValue(0.92)
+        self.cb_origin_x_spinbox.setSingleStep(0.01)
+        self.cb_origin_x_spinbox.setDecimals(2)
+        origin_layout.addWidget(self.cb_origin_x_spinbox)
+        self.cb_origin_y_spinbox = QDoubleSpinBox()
+        self.cb_origin_y_spinbox.setRange(0, 1)
+        self.cb_origin_y_spinbox.setValue(0.1)
+        self.cb_origin_y_spinbox.setSingleStep(0.01)
+        self.cb_origin_y_spinbox.setDecimals(2)
+        origin_layout.addWidget(self.cb_origin_y_spinbox)
+        cb_layout.addLayout(origin_layout, 4, 1, 1, 2)
+        cb_layout.addWidget(QLabel("Size (w,h):"), 5, 0)
+        size_layout_cb = QHBoxLayout()
+        self.cb_size_w_spinbox = QDoubleSpinBox()
+        self.cb_size_w_spinbox.setRange(0.01, 0.5)
+        self.cb_size_w_spinbox.setValue(0.04)
+        self.cb_size_w_spinbox.setSingleStep(0.01)
+        self.cb_size_w_spinbox.setDecimals(2)
+        size_layout_cb.addWidget(self.cb_size_w_spinbox)
+        self.cb_size_h_spinbox = QDoubleSpinBox()
+        self.cb_size_h_spinbox.setRange(0.01, 1.0)
+        self.cb_size_h_spinbox.setValue(0.8)
+        self.cb_size_h_spinbox.setSingleStep(0.01)
+        self.cb_size_h_spinbox.setDecimals(2)
+        size_layout_cb.addWidget(self.cb_size_h_spinbox)
+        cb_layout.addLayout(size_layout_cb, 5, 1, 1, 2)
+        layout.addWidget(general_group)
+        layout.addWidget(key_group)
+        layout.addWidget(cb_group)
+        self.toggle_key_options()
+        self.toggle_cb_size_controls()
+        self.toggle_colorbar_options()
         return panel
 
-    def connect_signals(self):
+    def connect_signals(self, *args, **kwargs):
         self.plot_mode_combo.currentIndexChanged.connect(self.on_mode_changed)
         self.add_as_vector_check.stateChanged.connect(self.update_column_input_ui)
         self.drop_zone.fileDropped.connect(self.handle_dropped_file)
-        
         self.title_check.stateChanged.connect(lambda: self.title_input.setEnabled(self.title_check.isChecked()))
         self.title_check.stateChanged.connect(self.request_redraw)
         self.title_input.textChanged.connect(self.request_redraw)
-        
         text_widgets = [self.xlabel_input, self.ylabel_input, self.y2label_input, self.zlabel_input,
-                        self.xrange_min, self.xrange_max, self.yrange_min, self.yrange_max, 
+                        self.xrange_min, self.xrange_max, self.yrange_min, self.yrange_max,
                         self.y2range_min, self.y2range_max, self.zrange_min, self.zrange_max,
                         self.xtics_xoffset, self.xtics_yoffset, self.ytics_xoffset, self.ytics_yoffset,
                         self.y2tics_xoffset, self.y2tics_yoffset, self.ztics_xoffset, self.ztics_yoffset,
                         self.width_input, self.height_input, self.cblabel_input, self.cbrange_min, self.cbrange_max]
-        for widget in text_widgets: widget.textChanged.connect(self.request_redraw)
-        
+        for widget in text_widgets:
+            widget.textChanged.connect(self.request_redraw)
         combo_widgets = [self.key_pos_combo, self.font_combo]
-        for widget in combo_widgets: widget.currentIndexChanged.connect(self.request_redraw)
-
+        for widget in combo_widgets:
+            widget.currentIndexChanged.connect(self.request_redraw)
         check_widgets = [self.xrange_check, self.yrange_check, self.y2range_check, self.zrange_check,
                          self.xtics_check, self.ytics_check, self.ztics_check, self.y2tics_offset_check,
                          self.logscale_x_check, self.logscale_y_check, self.logscale_y2_check, self.logscale_z_check,
                          self.grid_check, self.pm3d_check]
-        for widget in check_widgets: widget.stateChanged.connect(self.request_redraw)
-
+        for widget in check_widgets:
+            widget.stateChanged.connect(self.request_redraw)
         self.key_check.stateChanged.connect(self.toggle_key_options)
         self.key_check.stateChanged.connect(self.request_redraw)
         self.key_maxrows_spinbox.valueChanged.connect(self.request_redraw)
         self.key_maxcols_spinbox.valueChanged.connect(self.request_redraw)
-
         self.colorbar_check.stateChanged.connect(self.toggle_colorbar_options)
         self.colorbar_check.stateChanged.connect(self.request_redraw)
         self.cbrange_check.stateChanged.connect(self.request_redraw)
         self.cbsize_check.stateChanged.connect(self.toggle_cb_size_controls)
         self.cbsize_check.stateChanged.connect(self.request_redraw)
         spin_widgets = [self.cb_origin_x_spinbox, self.cb_origin_y_spinbox, self.cb_size_w_spinbox, self.cb_size_h_spinbox]
-        for widget in spin_widgets: widget.valueChanged.connect(self.request_redraw)
-
+        for widget in spin_widgets:
+            widget.valueChanged.connect(self.request_redraw)
         for slider, label in [(self.view_rot_x_slider, self.view_rot_x_label), (self.view_rot_z_slider, self.view_rot_z_label)]:
             slider.valueChanged.connect(lambda v, lbl=label: lbl.setText(str(v)))
             slider.valueChanged.connect(self.request_redraw)
-
         self.font_slider.valueChanged.connect(lambda v: self.font_label.setText(str(v)))
         self.font_slider.valueChanged.connect(self.request_redraw)
-
         self.plot_tabs.tabCloseRequested.connect(self.remove_plot)
         self.plot_tabs.tabBar().tabMoved.connect(self.handle_tab_moved)
 
-    def toggle_key_options(self):
+    def toggle_key_options(self, *args, **kwargs):
         is_enabled = self.key_check.isChecked()
         self.key_pos_combo.setEnabled(is_enabled)
         self.key_maxrows_spinbox.setEnabled(is_enabled)
         self.key_maxcols_spinbox.setEnabled(is_enabled)
-        
-    def toggle_colorbar_options(self):
+
+    def toggle_colorbar_options(self, *args, **kwargs):
         is_enabled = self.colorbar_check.isChecked()
         for widget in [self.cblabel_input, self.cbrange_check, self.cbrange_min, self.cbrange_max, self.cbsize_check]:
             widget.setEnabled(is_enabled)
-        self.toggle_cb_size_controls() if is_enabled else [w.setEnabled(False) for w in [self.cb_origin_x_spinbox, self.cb_origin_y_spinbox, self.cb_size_w_spinbox, self.cb_size_h_spinbox]]
+        if is_enabled:
+            self.toggle_cb_size_controls()
+        else:
+            [w.setEnabled(False) for w in [self.cb_origin_x_spinbox, self.cb_origin_y_spinbox, self.cb_size_w_spinbox, self.cb_size_h_spinbox]]
 
-    def toggle_cb_size_controls(self):
+    def toggle_cb_size_controls(self, *args, **kwargs):
         is_custom = self.cbsize_check.isChecked() and self.colorbar_check.isChecked()
         for widget in [self.cb_origin_x_spinbox, self.cb_origin_y_spinbox, self.cb_size_w_spinbox, self.cb_size_h_spinbox]:
             widget.setEnabled(is_custom)
 
-    def on_mode_changed(self):
+    def on_mode_changed(self, *args, **kwargs):
         if self.plots:
             reply = QMessageBox.question(self, 'Mode Change', "Changing plot mode will clear all plots. Continue?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.No:
@@ -560,9 +699,7 @@ class GnuplotGUIY2Axis(QMainWindow):
                 self.plot_mode_combo.setCurrentIndex(0 if self.current_mode == '2d' else 1)
                 self.plot_mode_combo.blockSignals(False)
                 return
-        
         self.clear_all_plots()
-        
         is_3d = self.plot_mode_combo.currentIndex() == 1
         self.current_mode = "3d" if is_3d else "2d"
         self.target_axis_label.setVisible(not is_3d)
@@ -572,40 +709,43 @@ class GnuplotGUIY2Axis(QMainWindow):
         self.view_settings_panel.setVisible(is_3d)
         self.update_column_input_ui()
         self.request_redraw()
-    
-    def update_column_input_ui(self):
+
+    def update_column_input_ui(self, *args, **kwargs):
         while self.column_input_layout.count():
             child = self.column_input_layout.takeAt(0)
-            if child.widget(): child.widget().deleteLater()
+            if child.widget():
+                child.widget().deleteLater()
         self.column_spinboxes.clear()
         is_vector = self.add_as_vector_check.isChecked()
         is_3d = (self.current_mode == '3d')
-        num_boxes, labels = ((6, ["x","y","z","dx","dy","dz"]) if is_vector else (3, ["x","y","z"])) if is_3d else ((4, ["x","y","dx","dy"]) if is_vector else (2, ["x","y"]))
+        num_boxes, labels = ((6, ["x", "y", "z", "dx", "dy", "dz"]) if is_vector else (3, ["x", "y", "z"])) if is_3d else ((4, ["x", "y", "dx", "dy"]) if is_vector else (2, ["x", "y"]))
         for i in range(num_boxes):
-            spinbox = QSpinBox(); spinbox.setMinimum(1); spinbox.setValue(i + 1); spinbox.setToolTip(labels[i])
-            self.column_spinboxes.append(spinbox); self.column_input_layout.addWidget(spinbox)
+            spinbox = QSpinBox()
+            spinbox.setMinimum(1)
+            spinbox.setValue(i + 1)
+            spinbox.setToolTip(labels[i])
+            self.column_spinboxes.append(spinbox)
+            self.column_input_layout.addWidget(spinbox)
 
     def handle_dropped_file(self, file_path):
         self.current_selected_file_path = file_path
         self.new_plot_file_input.setText(os.path.basename(file_path))
 
-    def select_plot_file(self):
+    def select_plot_file(self, *args, **kwargs):
         file_name, _ = QFileDialog.getOpenFileName(self, "Select Data File", "", "Data Files (*.dat *.txt);;All Files (*)")
         if file_name:
             self.current_selected_file_path = file_name
             self.new_plot_file_input.setText(os.path.basename(file_name))
 
-    def request_redraw(self):
+    def request_redraw(self, *args, **kwargs):
         self.update_timer.start(250)
-    
-    def add_plot(self):
+
+    def add_plot(self, *args, **kwargs):
         if not self.current_selected_file_path:
             QMessageBox.warning(self, "Warning", "Please select a file first.")
             return
-
         using = ":".join([str(sb.value()) for sb in self.column_spinboxes])
         is_vector = self.add_as_vector_check.isChecked()
-        
         plot_info = {
             "path": self.current_selected_file_path, "using": using, "is_vector": is_vector,
             "is_3d_mode": self.current_mode == '3d',
@@ -615,7 +755,6 @@ class GnuplotGUIY2Axis(QMainWindow):
                 "vector_options": {"nohead": False, "head_style": "Default", "head_size": "0.1,15,60", "length_scale": 1.0, "normalize": False}
             }
         }
-        
         if is_vector:
             plot_info["style"]["color_from_value"] = True
             cols = [f"${c}" for c in plot_info["using"].split(':')]
@@ -623,23 +762,18 @@ class GnuplotGUIY2Axis(QMainWindow):
                 plot_info["style"]["color_expression"] = f"sqrt({cols[2]}**2+{cols[3]}**2)" if len(cols) > 3 else ""
             else:
                 plot_info["style"]["color_expression"] = f"sqrt({cols[3]}**2+{cols[4]}**2+{cols[5]}**2)" if len(cols) > 5 else ""
-
         if self.current_mode == '2d':
             plot_info["axis"] = "y1" if self.new_plot_axis_combo.currentIndex() == 0 else "y2"
             plot_info["title"] = f"{os.path.basename(self.current_selected_file_path)} u {using} ({plot_info['axis']})"
         else:
             plot_info["axis"] = None
             plot_info["title"] = f"{os.path.basename(self.current_selected_file_path)} u {using}"
-
         self.plots.append(plot_info)
-
         editor = PlotEditorWidget(plot_info, self.dashtype_map)
         editor.plotChanged.connect(self.request_redraw)
         editor.titleChanged.connect(lambda title, idx=len(self.plots)-1: self.plot_tabs.setTabText(idx, title))
-        
         tab_index = self.plot_tabs.addTab(editor, plot_info["title"])
         self.plot_tabs.setCurrentIndex(tab_index)
-        
         self.new_plot_file_input.clear()
         self.current_selected_file_path = None
         self.request_redraw()
@@ -672,7 +806,6 @@ class GnuplotGUIY2Axis(QMainWindow):
         self.request_redraw()
 
     def generate_gnuplot_script(self, output_path=None, terminal_cmd=None):
-        # (省略... 変更なし)
         if not self.plots: return None
         if terminal_cmd: script = f"{terminal_cmd}\n"
         else:
@@ -782,12 +915,12 @@ class GnuplotGUIY2Axis(QMainWindow):
         if plot_parts: script += f"{plot_command} " + ", \\\n    ".join(plot_parts) + "\n"
         return script
 
-    def redraw_plot(self):
-        # (省略... 変更なし)
+    def redraw_plot(self, *args, **kwargs):
         script = self.generate_gnuplot_script()
         if not script:
             self.plot_label.setText("Please add a plot to begin.")
-            self.script_display.clear(); self.script_display.setFixedHeight(30)
+            self.script_display.clear()
+            self.script_display.setFixedHeight(30)
             return
         self.script_display.setText(script)
         new_height = int(self.script_display.document().size().height()) + 15
@@ -798,32 +931,44 @@ class GnuplotGUIY2Axis(QMainWindow):
             if process.returncode != 0:
                 self.plot_label.setText(f"Gnuplot Error:\n{stderr_data.decode('utf-8', 'ignore')}")
                 return
-            pixmap = QPixmap();
-            if pixmap.loadFromData(stdout_data): self.plot_label.setPixmap(pixmap.scaled(self.plot_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            else: self.plot_label.setText("Failed to load image from Gnuplot.")
-        except Exception as e: self.plot_label.setText(f"Runtime Error:\n{e}")
+            pixmap = QPixmap()
+            if pixmap.loadFromData(stdout_data):
+                self.plot_label.setPixmap(pixmap.scaled(self.plot_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            else:
+                self.plot_label.setText("Failed to load image from Gnuplot.")
+        except Exception as e:
+            self.plot_label.setText(f"Runtime Error:\n{e}")
 
-    def save_image(self):
-        # (省略... 変更なし)
-        if not self.plots: QMessageBox.warning(self, "Error", "No data to plot."); return
+    def save_image(self, *args, **kwargs):
+        if not self.plots:
+            QMessageBox.warning(self, "Error", "No data to plot.")
+            return
         file_name, selected_filter = QFileDialog.getSaveFileName(self, "Save Graph As", "", "PNG Image (*.png);;SVG Image (*.svg);;PDF Document (*.pdf)")
-        if not file_name: return
+        if not file_name:
+            return
         width, height = int(self.width_input.text() or "800"), int(self.height_input.text() or "600")
         font = f'font "{self.font_combo.currentText()},{self.font_slider.value()}"'
-        if "svg" in selected_filter: term_cmd = f'set terminal svg size {width},{height} {font}'
-        elif "pdf" in selected_filter: term_cmd = f'set terminal pdfcairo size {width/100.0:.2f},{height/100.0:.2f} {font}'
-        else: term_cmd = f'set terminal pngcairo size {width},{height} enhanced {font}'
+        if "svg" in selected_filter:
+            term_cmd = f'set terminal svg size {width},{height} {font}'
+        elif "pdf" in selected_filter:
+            term_cmd = f'set terminal pdfcairo size {width/100.0:.2f},{height/100.0:.2f} {font}'
+        else:
+            term_cmd = f'set terminal pngcairo size {width},{height} enhanced {font}'
         script = self.generate_gnuplot_script(output_path=file_name, terminal_cmd=term_cmd)
-        if not script: QMessageBox.critical(self, "Error", "Failed to generate script."); return
+        if not script:
+            QMessageBox.critical(self, "Error", "Failed to generate script.")
+            return
         try:
             process = subprocess.Popen(['gnuplot'], stdin=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', creationflags=CREATE_NO_WINDOW)
             _, stderr = process.communicate(script)
-            if process.returncode == 0: QMessageBox.information(self, "Success", f"Graph saved to {file_name}")
-            else: QMessageBox.critical(self, "Gnuplot Error", f"Failed to save graph.\n\n{stderr}")
-        except Exception as e: QMessageBox.critical(self, "Runtime Error", f"An error occurred.\n\n{e}")
+            if process.returncode == 0:
+                QMessageBox.information(self, "Success", f"Graph saved to {file_name}")
+            else:
+                QMessageBox.critical(self, "Gnuplot Error", f"Failed to save graph.\n\n{stderr}")
+        except Exception as e:
+            QMessageBox.critical(self, "Runtime Error", f"An error occurred.\n\n{e}")
 
-    def save_gp_file(self):
-        # (省略... 変更なし)
+    def save_gp_file(self, *args, **kwargs):
         if not self.plots:
             QMessageBox.warning(self, "Warning", "No plot data to save.")
             return
@@ -831,25 +976,20 @@ class GnuplotGUIY2Axis(QMainWindow):
         if not base_script:
             QMessageBox.critical(self, "Error", "Failed to generate script.")
             return
-        
         script_lines = base_script.splitlines()
         font_setting = f'font "{self.font_combo.currentText()},{self.font_slider.value()}"'
         interactive_terminal = f'set terminal wxt enhanced {font_setting}'
-        
         for i, line in enumerate(script_lines):
             if line.strip().startswith("set terminal pngcairo"):
                 script_lines[i] = interactive_terminal
                 break
         else:
             script_lines.insert(0, interactive_terminal)
-
         script_lines.append('\npause -1 "Press Enter or close window to exit."')
         script_content = "\n".join(script_lines)
-
         file_name, _ = QFileDialog.getSaveFileName(self, "Save Gnuplot Script As", "", "Gnuplot Script (*.gp);;All Files (*)")
         if not file_name:
             return
-
         try:
             with open(file_name, 'w', encoding='utf-8') as f:
                 f.write(script_content)
@@ -857,85 +997,133 @@ class GnuplotGUIY2Axis(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save script file.\n\n{e}")
 
-    # ★ Cファイル保存用のメソッドを追加
     def save_for_c(self):
-        """GnuplotコマンドをC言語のソースファイルとして保存する"""
         if not self.plots:
             QMessageBox.warning(self, "Warning", "No plot data to save.")
-            return
-            
-        base_script = self.generate_gnuplot_script()
-        if not base_script:
-            QMessageBox.critical(self, "Error", "Failed to generate script.")
             return
 
         file_name, _ = QFileDialog.getSaveFileName(self, "Save for C Language As", "", "C Source File (*.c);;All Files (*)")
         if not file_name:
             return
 
-        # C言語の定型コードを準備
+        output_dir_name = "output"
+        output_png_basename = os.path.splitext(os.path.basename(file_name))[0] + ".png"
+        gnuplot_output_path = f"{output_dir_name}/{output_png_basename}"
+
+        width = int(self.width_input.text() or "800")
+        height = int(self.height_input.text() or "600")
+        font = f'font "{self.font_combo.currentText()},{self.font_slider.value()}"'
+        term_cmd = f'set terminal pngcairo size {width},{height} enhanced {font}'
+        
+        script_content = self.generate_gnuplot_script(output_path=gnuplot_output_path, terminal_cmd=term_cmd)
+
+        if not script_content:
+            QMessageBox.critical(self, "Error", "Failed to generate script.")
+            return
+
         c_code_parts = [
-            '#include <stdio.h>',
-            '#include <stdlib.h>',
+            '#include <stdio.h>', '#include <stdlib.h>',
+            '#ifdef _WIN32', '#include <direct.h>', '#define MKDIR(path) _mkdir(path)',
+            '#else', '#include <sys/stat.h>', '#include <sys/types.h>', '#define MKDIR(path) mkdir(path, 0777)', '#endif',
             '',
-            'int main() {',
-            '    FILE *gp;',
-            '',
-            '    // gnuplotプロセスへのパイプを開く。"-persist"でウィンドウが残る',
-            '    gp = popen("gnuplot -persist", "w");',
+            'int main() {', '    FILE *gp;', f'    const char* dir_name = "{output_dir_name}";',
+            '', '    MKDIR(dir_name);', '', '    gp = popen("gnuplot", "w");',
             '    if (gp == NULL) {',
             '        fprintf(stderr, "Error: gnuplotが見つかりません。PATHを確認してください。\\n");',
-            '        return 1;',
-            '    }',
-            '',
-            '    // Gnuplotコマンドの送信',
+            '        return 1;', '    }', '', '    // Gnuplotコマンドの送信',
         ]
 
-        script_lines = base_script.splitlines()
-        font_setting = f'font "{self.font_combo.currentText()},{self.font_slider.value()}"'
-        interactive_terminal = f'set terminal wxt enhanced {font_setting}'
-
-        # ターミナル設定をウィンドウ用に差し替える
-        is_terminal_set = False
-        for line in script_lines:
-            # エスケープ処理: Cの文字列内で使えるように \ と " をエスケープする
+        for line in script_content.splitlines():
             escaped_line = line.replace('\\', '\\\\').replace('"', '\\"')
-            
-            if escaped_line.strip().startswith("set terminal pngcairo"):
-                c_code_parts.append(f'    fprintf(gp, "{interactive_terminal.replace("\"", "\\\"")}\\n");')
-                is_terminal_set = True
-            else:
-                c_code_parts.append(f'    fprintf(gp, "{escaped_line}\\n");')
-        
-        if not is_terminal_set:
-             c_code_parts.insert(len(c_code_parts) - len(script_lines), f'    fprintf(gp, "{interactive_terminal.replace("\"", "\\\"")}\\n");')
+            c_code_parts.append(f'    fprintf(gp, "{escaped_line}\\n");')
              
-        # Cコードの結び
         c_code_parts.extend([
-            '',
-            '    fflush(gp); // コマンドをフラッシュして即時実行',
-            '    // パイプを閉じる',
-            '    pclose(gp);',
-            '',
-            '    return 0;',
-            '}'
+            '', '    pclose(gp);', '',
+            f'    printf("Graph saved to {gnuplot_output_path.replace("\\\\", "/")}\\n");',
+            '', '    return 0;', '}'
         ])
         
         c_content = "\n".join(c_code_parts)
 
         try:
-            with open(file_name, 'w', encoding='utf-8') as f:
-                f.write(c_content)
+            with open(file_name, 'w', encoding='utf-8') as f: f.write(c_content)
             QMessageBox.information(self, "Success", f"C source file saved to {os.path.basename(file_name)}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save C source file.\n\n{e}")
 
+    def export_project(self):
+        """現在の設定からPNG, GP, Cファイルを一括でフォルダに保存する"""
+        if not self.plots:
+            QMessageBox.warning(self, "Warning", "No plot data to export.")
+            return
+            
+        base_dir = QFileDialog.getExistingDirectory(self, "Select Directory to Save Project Folder")
+        if not base_dir:
+            return
+
+        project_name, ok = QInputDialog.getText(self, "Export Project", "Enter a project name (for folder and files):", text="my_plot_project")
+        if not ok or not project_name:
+            return
+
+        project_path = os.path.join(base_dir, project_name)
+        
+        try:
+            os.makedirs(project_path, exist_ok=True)
+            
+            # --- 1. PNGを保存 ---
+            png_path = os.path.join(project_path, project_name + ".png").replace('\\', '/')
+            width, height = int(self.width_input.text() or "800"), int(self.height_input.text() or "600")
+            font = f'font "{self.font_combo.currentText()},{self.font_slider.value()}"'
+            term_cmd = f'set terminal pngcairo size {width},{height} enhanced {font}'
+            script = self.generate_gnuplot_script(output_path=png_path, terminal_cmd=term_cmd)
+            process = subprocess.Popen(['gnuplot'], stdin=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', creationflags=CREATE_NO_WINDOW)
+            _, stderr = process.communicate(script)
+            if process.returncode != 0: raise Exception(f"Gnuplot error for PNG:\n{stderr}")
+
+            # --- 2. GPファイルを保存 ---
+            gp_path = os.path.join(project_path, project_name + ".gp")
+            base_script_gp = self.generate_gnuplot_script()
+            script_lines_gp = base_script_gp.splitlines()
+            interactive_terminal = f'set terminal wxt enhanced {font}'
+            for i, line in enumerate(script_lines_gp):
+                if line.strip().startswith("set terminal pngcairo"):
+                    script_lines_gp[i] = interactive_terminal
+                    break
+            else: script_lines_gp.insert(0, interactive_terminal)
+            script_lines_gp.append('\npause -1 "Press Enter or close window to exit."')
+            with open(gp_path, 'w', encoding='utf-8') as f: f.write("\n".join(script_lines_gp))
+
+            # --- 3. Cファイルを保存 ---
+            c_path = os.path.join(project_path, project_name + ".c")
+            output_dir_name = "output"
+            gnuplot_output_path = f"{output_dir_name}/{project_name}.png"
+            script_content_c = self.generate_gnuplot_script(output_path=gnuplot_output_path, terminal_cmd=term_cmd)
+            
+            c_code_parts = [
+                '#include <stdio.h>', '#include <stdlib.h>',
+                '#ifdef _WIN32', '#include <direct.h>', '#define MKDIR(path) _mkdir(path)',
+                '#else', '#include <sys/stat.h>', '#include <sys/types.h>', '#define MKDIR(path) mkdir(path, 0777)', '#endif',
+                '', 'int main() {', '    FILE *gp;', f'    const char* dir_name = "{output_dir_name}";',
+                '', '    MKDIR(dir_name);', '', '    gp = popen("gnuplot", "w");',
+                '    if (gp == NULL) {', '        fprintf(stderr, "Error: gnuplotが見つかりません。PATHを確認してください。\\n");', '        return 1;', '    }', '', '    // Gnuplotコマンドの送信',
+            ]
+            for line in script_content_c.splitlines():
+                c_code_parts.append(f'    fprintf(gp, "{line.replace("\\\\", "\\\\\\\\").replace("\"", "\\\"")}\\n");')
+            c_code_parts.extend([
+                '', '    pclose(gp);', '', f'    printf("Graph saved to {gnuplot_output_path.replace("\\\\", "/")}\\n");', '', '    return 0;', '}'
+            ])
+            with open(c_path, 'w', encoding='utf-8') as f: f.write("\n".join(c_code_parts))
+            
+            QMessageBox.information(self, "Export Successful", f"Project '{project_name}' was successfully exported to:\n{base_dir}")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"An error occurred during export.\n\n{e}")
+
     # (省略... collect_settings から main まで変更なし)
-    def collect_settings(self):
+    def collect_settings(self, *args, **kwargs):
         settings = {
-            'version': 2.2,
-            'plot_mode': self.plot_mode_combo.currentIndex(),
-            'plots': self.plots,
+            'version': 2.4, # バージョン更新
+            'plot_mode': self.plot_mode_combo.currentIndex(), 'plots': self.plots,
             'legend': {'key_check': self.key_check.isChecked(), 'key_pos': self.key_pos_combo.currentText(), 'key_maxrows': self.key_maxrows_spinbox.value(), 'key_maxcols': self.key_maxcols_spinbox.value()},
             'general': {'title_check': self.title_check.isChecked(), 'title_input': self.title_input.text()},
             'xaxis': {'label': self.xlabel_input.text(), 'range_check': self.xrange_check.isChecked(), 'range_min': self.xrange_min.text(), 'range_max': self.xrange_max.text(), 'tics_check': self.xtics_check.isChecked(), 'tics_xoffset': self.xtics_xoffset.text(), 'tics_yoffset': self.xtics_yoffset.text(), 'log_check': self.logscale_x_check.isChecked(), 'grid_check': self.grid_check.isChecked()},
@@ -961,9 +1149,7 @@ class GnuplotGUIY2Axis(QMainWindow):
             self.axis_tabs.setTabVisible(self.axis_tabs.indexOf(self.z_axis_tab), is_3d)
             self.view_settings_panel.setVisible(is_3d)
             self.update_column_input_ui()
-
             s = settings.get('legend', {}); self.key_check.setChecked(s.get('key_check', True)); self.key_pos_combo.setCurrentText(s.get('key_pos', 'default')); self.key_maxrows_spinbox.setValue(s.get('key_maxrows', 0)); self.key_maxcols_spinbox.setValue(s.get('key_maxcols', 0)); self.toggle_key_options()
-            
             s = settings.get('general', {}); self.title_check.setChecked(s.get('title_check', False)); self.title_input.setText(s.get('title_input', '')); self.title_input.setEnabled(self.title_check.isChecked())
             s = settings.get('xaxis', {}); self.xlabel_input.setText(s.get('label', 'X-Axis')); self.xrange_check.setChecked(s.get('range_check', False)); self.xrange_min.setText(s.get('range_min', '')); self.xrange_max.setText(s.get('range_max', '')); self.xtics_check.setChecked(s.get('tics_check', False)); self.xtics_xoffset.setText(s.get('tics_xoffset', '0')); self.xtics_yoffset.setText(s.get('tics_yoffset', '-1')); self.logscale_x_check.setChecked(s.get('log_check', False)); self.grid_check.setChecked(s.get('grid_check', False))
             s = settings.get('yaxis', {}); self.ylabel_input.setText(s.get('label', 'Y-Axis')); self.yrange_check.setChecked(s.get('range_check', False)); self.yrange_min.setText(s.get('range_min', '')); self.yrange_max.setText(s.get('range_max', '')); self.ytics_check.setChecked(s.get('tics_check', False)); self.ytics_xoffset.setText(s.get('tics_xoffset', '-1')); self.ytics_yoffset.setText(s.get('tics_yoffset', '0')); self.logscale_y_check.setChecked(s.get('log_check', False))
@@ -972,7 +1158,6 @@ class GnuplotGUIY2Axis(QMainWindow):
             s = settings.get('view3d', {}); self.view_rot_x_slider.setValue(s.get('rot_x', 60)); self.view_rot_z_slider.setValue(s.get('rot_z', 30)); self.pm3d_check.setChecked(s.get('pm3d_check', True))
             s = settings.get('output', {}); self.width_input.setText(s.get('width', '800')); self.height_input.setText(s.get('height', '600')); self.font_combo.setCurrentText(s.get('font_name', 'Times New Roman')); self.font_slider.setValue(s.get('font_size', 14))
             s = settings.get('colorbar', {}); self.colorbar_check.setChecked(s.get('check', True)); self.cblabel_input.setText(s.get('label', 'Magnitude')); self.cbrange_check.setChecked(s.get('range_check', False)); self.cbrange_min.setText(s.get('range_min', '')); self.cbrange_max.setText(s.get('range_max', '')); self.cbsize_check.setChecked(s.get('size_check', False)); self.cb_origin_x_spinbox.setValue(s.get('origin_x', 0.92)); self.cb_origin_y_spinbox.setValue(s.get('origin_y', 0.1)); self.cb_size_w_spinbox.setValue(s.get('size_w', 0.04)); self.cb_size_h_spinbox.setValue(s.get('size_h', 0.8)); self.toggle_colorbar_options()
-
             loaded_plots = settings.get('plots', [])
             for i, plot_info in enumerate(loaded_plots):
                 self.plots.append(plot_info)
@@ -984,7 +1169,7 @@ class GnuplotGUIY2Axis(QMainWindow):
             for widget in self.findChildren(QWidget): widget.blockSignals(False)
         self.request_redraw()
 
-    def save_settings(self):
+    def save_settings(self, *args, **kwargs):
         file_name, _ = QFileDialog.getSaveFileName(self, "Save Settings As", "", "JSON Files (*.json)")
         if not file_name: return
         settings = self.collect_settings()
@@ -993,7 +1178,7 @@ class GnuplotGUIY2Axis(QMainWindow):
             QMessageBox.information(self, "Success", f"Settings saved to {os.path.basename(file_name)}")
         except Exception as e: QMessageBox.critical(self, "Error", f"Failed to save settings file.\n\n{e}")
 
-    def load_settings(self):
+    def load_settings(self, *args, **kwargs):
         if self.plots:
             reply = QMessageBox.question(self, 'Load Settings', "This will clear current plots and load new settings. Continue?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.No: return
@@ -1005,7 +1190,7 @@ class GnuplotGUIY2Axis(QMainWindow):
             QMessageBox.information(self, "Success", f"Settings loaded from {os.path.basename(file_name)}")
         except Exception as e: QMessageBox.critical(self, "Error", f"Failed to load settings file.\n\n{e}")
 
-    def clear_all_plots(self):
+    def clear_all_plots(self, *args, **kwargs):
         self.plot_tabs.blockSignals(True)
         while self.plot_tabs.count() > 0: self.plot_tabs.removeTab(0)
         self.plots.clear()
