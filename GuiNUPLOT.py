@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QFont, QPixmap, QAction
 from PySide6.QtCore import Qt, QTimer, Signal
 
-# Windowsで実行する際にコンソールウィンドウを非表示にするためのフラグです.
+# Windowsで実行する際にコンソールウィンドウを非表示にするためのフラグです
 CREATE_NO_WINDOW = 0
 if os.name == 'nt':
     CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
