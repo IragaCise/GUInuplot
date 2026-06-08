@@ -286,6 +286,9 @@ class GnuplotGUIY2Axis(QMainWindow):
         self.update_timer.setSingleShot(True)
         self.update_timer.timeout.connect(self.redraw_plot)
         self.init_ui()
+        
+        # 起動時に設定を自動ロードする
+        self.auto_load_settings()
 
     def init_ui(self):
         self.create_menu_bar()
@@ -421,6 +424,15 @@ class GnuplotGUIY2Axis(QMainWindow):
         self.title_input = QLineEdit("My Graph Title")
         self.title_input.setEnabled(False)
         layout.addWidget(self.title_input, 0, 1)
+
+        # 枠線（ボーダー・目盛り線）の太さ
+        layout.addWidget(QLabel("Frame/Tics Line Width:"), 1, 0)
+        self.border_width_spinbox = QDoubleSpinBox()
+        self.border_width_spinbox.setRange(0.1, 10.0)
+        self.border_width_spinbox.setValue(1.0)
+        self.border_width_spinbox.setSingleStep(0.1)
+        layout.addWidget(self.border_width_spinbox, 1, 1)
+
         return panel
 
     def create_axis_settings_panel(self, *args, **kwargs):
@@ -459,8 +471,26 @@ class GnuplotGUIY2Axis(QMainWindow):
         layout.addLayout(xtics_layout, 2, 1, 1, 2)
         self.logscale_x_check = QCheckBox("Log Scale (X-Axis)")
         layout.addWidget(self.logscale_x_check, 3, 0, 1, 3)
+
+        # グリッド設定と太さ
+        grid_layout = QHBoxLayout()
         self.grid_check = QCheckBox("Show Grid")
-        layout.addWidget(self.grid_check, 4, 0, 1, 3)
+        grid_layout.addWidget(self.grid_check)
+        
+        self.grid_width_label = QLabel("Grid Width:")
+        self.grid_width_label.setEnabled(False)
+        grid_layout.addWidget(self.grid_width_label)
+
+        self.grid_width_spinbox = QDoubleSpinBox()
+        self.grid_width_spinbox.setRange(0.1, 10.0)
+        self.grid_width_spinbox.setValue(1.0)
+        self.grid_width_spinbox.setSingleStep(0.1)
+        self.grid_width_spinbox.setEnabled(False)
+        grid_layout.addWidget(self.grid_width_spinbox)
+        grid_layout.addStretch(1)
+        
+        layout.addLayout(grid_layout, 4, 0, 1, 3)
+
         return tab
 
     def create_y1axis_tab(self, *args, **kwargs):
@@ -707,6 +737,13 @@ class GnuplotGUIY2Axis(QMainWindow):
                          self.grid_check, self.pm3d_check, self.cb_format_10_power_check]
         for widget in check_widgets:
             widget.stateChanged.connect(self.request_redraw)
+
+        # 追加: 新しいSpinBoxのシグナル
+        self.border_width_spinbox.valueChanged.connect(self.request_redraw)
+        self.grid_width_spinbox.valueChanged.connect(self.request_redraw)
+        self.grid_check.stateChanged.connect(lambda state: self.grid_width_spinbox.setEnabled(self.grid_check.isChecked()))
+        self.grid_check.stateChanged.connect(lambda state: self.grid_width_label.setEnabled(self.grid_check.isChecked()))
+
         self.key_check.stateChanged.connect(self.toggle_key_options)
         self.key_check.stateChanged.connect(self.request_redraw)
         self.key_maxrows_spinbox.valueChanged.connect(self.request_redraw)
@@ -898,6 +935,10 @@ class GnuplotGUIY2Axis(QMainWindow):
         if output_path: script += f'set output "{output_path}"\n'
         script += 'set encoding utf8\n'
         script += 'set palette rgbformulae 22,13,-31\n'
+        
+        # 追加: 枠線・目盛りの太さ設定
+        script += f'set border linewidth {self.border_width_spinbox.value():.1f}\n'
+
         if self.title_check.isChecked() and self.title_input.text(): script += f'set title "{self.title_input.text()}"\n'
         if self.xlabel_input.text(): script += f'set xlabel "{self.xlabel_input.text()}"\n'
         if self.ylabel_input.text(): script += f'set ylabel "{self.ylabel_input.text()}"\n'
@@ -920,7 +961,10 @@ class GnuplotGUIY2Axis(QMainWindow):
         log_axes = ""
         if self.logscale_x_check.isChecked(): log_axes += "x"
         if self.logscale_y_check.isChecked(): log_axes += "y"
-        if self.grid_check.isChecked(): script += 'set grid\n'
+        
+        # 追加: グリッド設定と太さ
+        if self.grid_check.isChecked(): 
+            script += f'set grid linewidth {self.grid_width_spinbox.value():.1f}\n'
         
         if self.key_check.isChecked():
             key_options = [self.key_pos_combo.currentText()]
@@ -1268,7 +1312,8 @@ class GnuplotGUIY2Axis(QMainWindow):
                 '    if (gp == NULL) {', '        fprintf(stderr, "Error: gnuplotが見つかりません。PATHを確認してください。\\n");', '        return 1;', '    }', '', '    // Gnuplotコマンドの送信',
             ]
             for line in script_content_c.splitlines():
-                c_code_parts.append(f'    fprintf(gp, "{line.replace("\\\\", "\\\\\\\\").replace("\"", "\\\"")}\\n");')
+                escaped_line = line.replace('\\', '\\\\').replace('"', '\\"')
+                c_code_parts.append(f'    fprintf(gp, "{escaped_line}\\n");')
             c_code_parts.extend([
                 '', '    pclose(gp);', '', f'    printf("Graph saved to {gnuplot_output_path.replace("\\\\", "/")}\\n");', '', '    return 0;', '}'
             ])
@@ -1284,8 +1329,8 @@ class GnuplotGUIY2Axis(QMainWindow):
             'version': 3.1, # bumped version
             'plot_mode': self.plot_mode_combo.currentIndex(), 'plots': self.plots,
             'legend': {'key_check': self.key_check.isChecked(), 'key_pos': self.key_pos_combo.currentText(), 'key_maxrows': self.key_maxrows_spinbox.value(), 'key_maxcols': self.key_maxcols_spinbox.value()},
-            'general': {'title_check': self.title_check.isChecked(), 'title_input': self.title_input.text()},
-            'xaxis': {'label': self.xlabel_input.text(), 'range_check': self.xrange_check.isChecked(), 'range_min': self.xrange_min.text(), 'range_max': self.xrange_max.text(), 'tics_check': self.xtics_check.isChecked(), 'tics_xoffset': self.xtics_xoffset.text(), 'tics_yoffset': self.xtics_yoffset.text(), 'log_check': self.logscale_x_check.isChecked(), 'grid_check': self.grid_check.isChecked()},
+            'general': {'title_check': self.title_check.isChecked(), 'title_input': self.title_input.text(), 'border_width': self.border_width_spinbox.value()},
+            'xaxis': {'label': self.xlabel_input.text(), 'range_check': self.xrange_check.isChecked(), 'range_min': self.xrange_min.text(), 'range_max': self.xrange_max.text(), 'tics_check': self.xtics_check.isChecked(), 'tics_xoffset': self.xtics_xoffset.text(), 'tics_yoffset': self.xtics_yoffset.text(), 'log_check': self.logscale_x_check.isChecked(), 'grid_check': self.grid_check.isChecked(), 'grid_width': self.grid_width_spinbox.value()},
             'yaxis': {'label': self.ylabel_input.text(), 'range_check': self.yrange_check.isChecked(), 'range_min': self.yrange_min.text(), 'range_max': self.yrange_max.text(), 'tics_check': self.ytics_check.isChecked(), 'tics_xoffset': self.ytics_xoffset.text(), 'tics_yoffset': self.ytics_yoffset.text(), 'log_check': self.logscale_y_check.isChecked()},
             'y2axis': {'label': self.y2label_input.text(), 'range_check': self.y2range_check.isChecked(), 'range_min': self.y2range_min.text(), 'range_max': self.y2range_max.text(), 'tics_check': self.y2tics_offset_check.isChecked(), 'tics_xoffset': self.y2tics_xoffset.text(), 'tics_yoffset': self.y2tics_yoffset.text(), 'log_check': self.logscale_y2_check.isChecked()},
             'zaxis': {'label': self.zlabel_input.text(), 'range_check': self.zrange_check.isChecked(), 'range_min': self.zrange_min.text(), 'range_max': self.zrange_max.text(), 'tics_check': self.ztics_check.isChecked(), 'tics_xoffset': self.ztics_xoffset.text(), 'tics_yoffset': self.ztics_yoffset.text(), 'log_check': self.logscale_z_check.isChecked()},
@@ -1309,8 +1354,8 @@ class GnuplotGUIY2Axis(QMainWindow):
             self.view_settings_panel.setVisible(is_3d)
             self.update_column_input_ui()
             s = settings.get('legend', {}); self.key_check.setChecked(s.get('key_check', True)); self.key_pos_combo.setCurrentText(s.get('key_pos', 'default')); self.key_maxrows_spinbox.setValue(s.get('key_maxrows', 0)); self.key_maxcols_spinbox.setValue(s.get('key_maxcols', 0)); self.toggle_key_options()
-            s = settings.get('general', {}); self.title_check.setChecked(s.get('title_check', False)); self.title_input.setText(s.get('title_input', '')); self.title_input.setEnabled(self.title_check.isChecked())
-            s = settings.get('xaxis', {}); self.xlabel_input.setText(s.get('label', 'X-Axis')); self.xrange_check.setChecked(s.get('range_check', False)); self.xrange_min.setText(s.get('range_min', '')); self.xrange_max.setText(s.get('range_max', '')); self.xtics_check.setChecked(s.get('tics_check', False)); self.xtics_xoffset.setText(s.get('tics_xoffset', '0')); self.xtics_yoffset.setText(s.get('tics_yoffset', '-1')); self.logscale_x_check.setChecked(s.get('log_check', False)); self.grid_check.setChecked(s.get('grid_check', False))
+            s = settings.get('general', {}); self.title_check.setChecked(s.get('title_check', False)); self.title_input.setText(s.get('title_input', '')); self.title_input.setEnabled(self.title_check.isChecked()); self.border_width_spinbox.setValue(s.get('border_width', 1.0))
+            s = settings.get('xaxis', {}); self.xlabel_input.setText(s.get('label', 'X-Axis')); self.xrange_check.setChecked(s.get('range_check', False)); self.xrange_min.setText(s.get('range_min', '')); self.xrange_max.setText(s.get('range_max', '')); self.xtics_check.setChecked(s.get('tics_check', False)); self.xtics_xoffset.setText(s.get('tics_xoffset', '0')); self.xtics_yoffset.setText(s.get('tics_yoffset', '-1')); self.logscale_x_check.setChecked(s.get('log_check', False)); self.grid_check.setChecked(s.get('grid_check', False)); self.grid_width_spinbox.setValue(s.get('grid_width', 1.0)); self.grid_width_spinbox.setEnabled(self.grid_check.isChecked()); self.grid_width_label.setEnabled(self.grid_check.isChecked())
             s = settings.get('yaxis', {}); self.ylabel_input.setText(s.get('label', 'Y-Axis')); self.yrange_check.setChecked(s.get('range_check', False)); self.yrange_min.setText(s.get('range_min', '')); self.yrange_max.setText(s.get('range_max', '')); self.ytics_check.setChecked(s.get('tics_check', False)); self.ytics_xoffset.setText(s.get('tics_xoffset', '-1')); self.ytics_yoffset.setText(s.get('tics_yoffset', '0')); self.logscale_y_check.setChecked(s.get('log_check', False))
             s = settings.get('y2axis', {}); self.y2label_input.setText(s.get('label', 'Y2-Axis')); self.y2range_check.setChecked(s.get('range_check', False)); self.y2range_min.setText(s.get('range_min', '')); self.y2range_max.setText(s.get('range_max', '')); self.y2tics_offset_check.setChecked(s.get('tics_check', False)); self.y2tics_xoffset.setText(s.get('tics_xoffset', '1')); self.y2tics_yoffset.setText(s.get('tics_yoffset', '0')); self.logscale_y2_check.setChecked(s.get('log_check', False))
             s = settings.get('zaxis', {}); self.zlabel_input.setText(s.get('label', 'Z-Axis')); self.zrange_check.setChecked(s.get('range_check', False)); self.zrange_min.setText(s.get('range_min', '')); self.zrange_max.setText(s.get('range_max', '')); self.ztics_check.setChecked(s.get('tics_check', False)); self.ztics_xoffset.setText(s.get('tics_xoffset', '0')); self.ztics_yoffset.setText(s.get('tics_yoffset', '0')); self.logscale_z_check.setChecked(s.get('log_check', False))
@@ -1348,6 +1393,24 @@ class GnuplotGUIY2Axis(QMainWindow):
             self.apply_settings(settings)
             QMessageBox.information(self, "Success", f"Settings loaded from {os.path.basename(file_name)}")
         except Exception as e: QMessageBox.critical(self, "Error", f"Failed to load settings file.\n\n{e}")
+
+    def auto_load_settings(self):
+        """起動時に同ディレクトリの settings.json を自動で読み込む"""
+        # exe化されている場合と、Pythonスクリプトとして実行されている場合の両方に対応
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            
+        settings_path = os.path.join(base_dir, "settings.json")
+        
+        if os.path.exists(settings_path):
+            try:
+                with open(settings_path, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                self.apply_settings(settings)
+            except Exception as e:
+                print(f"Failed to auto-load settings: {e}")
 
     def clear_all_plots(self, *args, **kwargs):
         self.plot_tabs.blockSignals(True)
