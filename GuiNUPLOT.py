@@ -1396,10 +1396,13 @@ class GnuplotGUIY2Axis(QMainWindow):
 
     def auto_load_settings(self):
         """起動時に同ディレクトリの settings.json を自動で読み込む"""
-        # exe化されている場合と、Pythonスクリプトとして実行されている場合の両方に対応
-        if getattr(sys, 'frozen', False):
-            base_dir = os.path.dirname(sys.executable)
+        # __compiled__ は Nuitka コンパイル時に定義されるグローバル変数です
+        if getattr(sys, 'frozen', False) or "__compiled__" in globals():
+            # exe化されている場合
+            # sys.executable ではなく、元のパスを保持している sys.argv[0] を使用する
+            base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
         else:
+            # 通常のPythonスクリプトとして実行されている場合
             base_dir = os.path.dirname(os.path.abspath(__file__))
             
         settings_path = os.path.join(base_dir, "settings.json")
