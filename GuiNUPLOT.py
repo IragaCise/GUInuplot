@@ -2,6 +2,10 @@ import sys
 import os
 import subprocess
 import json
+import hashlib
+import math
+import tempfile
+import threading
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QCheckBox, QFileDialog, QSlider,
@@ -9,12 +13,173 @@ from PySide6.QtWidgets import (
     QTabWidget, QGroupBox, QScrollArea, QSizePolicy, QSpinBox, QInputDialog
 )
 from PySide6.QtGui import QFont, QPixmap, QAction
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal, QObject, QRunnable, QThreadPool, QProcess
 
 # Windowsで実行する際にコンソールウィンドウを非表示にするためのフラグです
 CREATE_NO_WINDOW = 0
 if os.name == 'nt':
     CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW
+
+
+class PreviewCancelled(Exception):
+    """古いプレビューの準備が取り消された場合。"""
+
+
+class PreviewDataCache:
+    """設定を変更しても再利用できる、間引き済みテキストデータのキャッシュ。"""
+
+    def __init__(self, cache_dir):
+        self.cache_dir = cache_dir
+        self.statistics = {}  # (path, size, mtime_ns) -> (data_rows, scans)
+        self.sampled = {}     # (signature, max_points, is_3d) -> path
+
+    @staticmethod
+    def _is_data(line):
+        stripped = line.strip()
+        return bool(stripped) and not line.lstrip().startswith(b'#')
+
+    @staticmethod
+    def _check_cancel(cancel_event, i):
+        if i % 8192 == 0 and cancel_event.is_set():
+            raise PreviewCancelled()
+
+    def preview_path(self, source_path, max_points, is_3d, cancel_event):
+        # ファイルが更新された場合は size / mtime_ns が変わるので自動的に作り直す。
+        source_path = os.path.abspath(source_path)
+        stat = os.stat(source_path)
+        signature = (source_path, stat.st_size, stat.st_mtime_ns)
+        stats = self.statistics.get(signature)
+        if stats is None:
+            data_rows, scans = 0, 0
+            in_scan = False
+            with open(source_path, 'rb') as src:
+                for i, line in enumerate(src):
+                    self._check_cancel(cancel_event, i)
+                    if not line.strip():
+                        in_scan = False
+                    elif self._is_data(line):
+                        data_rows += 1
+                        if not in_scan:
+                            scans += 1
+                            in_scan = True
+            stats = (data_rows, scans)
+            self.statistics[signature] = stats
+
+        data_rows, scans = stats
+        if data_rows <= max_points:
+            return source_path
+        key = (signature, max_points, is_3d)
+        cached = self.sampled.get(key)
+        if cached and os.path.isfile(cached):
+            return cached
+
+        # 格子型3Dデータは空行が走査線を分けるので、行方向と走査線方向の両方を減らす。
+        # 空行のない点群、2Dデータは全体を等間隔で間引く。
+        grid = is_3d and scans > 1
+        if grid:
+            ratio = data_rows / max_points
+            scan_step = min(scans, max(1, math.ceil(math.sqrt(ratio))))
+            row_step = max(1, math.ceil(ratio / scan_step))
+        else:
+            scan_step = 1
+            row_step = max(1, math.ceil(data_rows / max_points))
+
+        hash_key = repr(key).encode('utf-8')
+        digest = hashlib.sha256(hash_key).hexdigest()[:24]
+        output_path = os.path.join(self.cache_dir, f'preview_{digest}.dat')
+        part_path = output_path + '.part'
+        try:
+            with open(source_path, 'rb') as src, open(part_path, 'wb') as dst:
+                data_index = 0
+                scan_index = -1
+                row_in_scan = 0
+                at_scan_start = True
+                consecutive_blanks = 0
+                block_break_pending = False
+                last_written_scan = -1
+                pending_separator = 0
+                has_written = False
+                for i, line in enumerate(src):
+                    self._check_cancel(cancel_event, i)
+                    if not line.strip():
+                        if grid:
+                            consecutive_blanks += 1
+                            at_scan_start = True
+                        else:
+                            pending_separator = min(2, pending_separator + 1)
+                        continue
+                    if not self._is_data(line):
+                        continue  # コメントは数値データではないためコピーしない
+
+                    if grid:
+                        if at_scan_start:
+                            if consecutive_blanks >= 2:
+                                block_break_pending = True
+                            consecutive_blanks = 0
+                            scan_index += 1
+                            row_in_scan = 0
+                            at_scan_start = False
+                        use_row = scan_index % scan_step == 0 and row_in_scan % row_step == 0
+                        if use_row:
+                            if has_written and last_written_scan != scan_index:
+                                dst.write(b'\n\n' if block_break_pending else b'\n')
+                            dst.write(line if line.endswith(b'\n') else line + b'\n')
+                            last_written_scan = scan_index
+                            block_break_pending = False
+                            has_written = True
+                        row_in_scan += 1
+                    else:
+                        if data_index % row_step == 0:
+                            if has_written and pending_separator:
+                                dst.write(b'\n' * pending_separator)
+                            dst.write(line if line.endswith(b'\n') else line + b'\n')
+                            pending_separator = 0
+                            has_written = True
+                        data_index += 1
+            if cancel_event.is_set():
+                raise PreviewCancelled()
+            os.replace(part_path, output_path)
+            self.sampled[key] = output_path
+            return output_path
+        finally:
+            if os.path.exists(part_path):
+                os.remove(part_path)
+
+
+class PreviewDataSignals(QObject):
+    finished = Signal(int, object, str)
+
+
+class PreviewDataTask(QRunnable):
+    """GUIスレッドを止めずに、必要なプレビュー用ファイルを用意する。"""
+
+    def __init__(self, cache, files, max_points, is_3d, token, cancel_event):
+        super().__init__()
+        self.cache = cache
+        self.files = files
+        self.max_points = max_points
+        self.is_3d = is_3d
+        self.token = token
+        self.cancel_event = cancel_event
+        self.signals = PreviewDataSignals()
+
+    def run(self):
+        try:
+            replacements = {}
+            for source_path in self.files:
+                if self.cancel_event.is_set():
+                    return
+                replacements[source_path] = self.cache.preview_path(
+                    source_path, self.max_points, self.is_3d, self.cancel_event
+                )
+            if not self.cancel_event.is_set():
+                self.signals.finished.emit(self.token, replacements, '')
+        except PreviewCancelled:
+            pass
+        except Exception as exc:
+            if not self.cancel_event.is_set():
+                self.signals.finished.emit(self.token, {}, str(exc))
+
 
 class DropLabel(QLabel):
     """ファイルがドロップされたことを通知するカスタムラベルウィジェット"""
@@ -285,6 +450,15 @@ class GnuplotGUIY2Axis(QMainWindow):
         self.update_timer = QTimer(self)
         self.update_timer.setSingleShot(True)
         self.update_timer.timeout.connect(self.redraw_plot)
+        # プレビュー描画は非同期で実行。古い描画は設定変更時に破棄する。
+        self._preview_generation = 0
+        self._preview_process = None
+        self._preview_cancel_event = threading.Event()
+        self._last_preview_pixmap = QPixmap()
+        self._preview_tempdir = tempfile.TemporaryDirectory(prefix='guinuplot_preview_')
+        self._preview_cache = PreviewDataCache(self._preview_tempdir.name)
+        self._preview_pool = QThreadPool(self)
+        self._preview_pool.setMaxThreadCount(1)
         self.init_ui()
         
         # 起動時に設定を自動ロードする
@@ -308,6 +482,7 @@ class GnuplotGUIY2Axis(QMainWindow):
         self.view_settings_panel = self.create_view_settings_panel()
         self.control_layout.addWidget(self.view_settings_panel)
         self.control_layout.addWidget(self.create_output_settings_panel())
+        self.control_layout.addWidget(self.create_preview_settings_panel())
         self.control_layout.addWidget(QLabel("Gnuplot Command Preview:"))
         self.script_display = QTextEdit()
         self.script_display.setReadOnly(True)
@@ -319,7 +494,14 @@ class GnuplotGUIY2Axis(QMainWindow):
         self.plot_label.setAlignment(Qt.AlignCenter)
         self.plot_label.setStyleSheet("background-color: #ffffff;")
         main_layout.addWidget(scroll_area)
-        main_layout.addWidget(self.plot_label, 1)
+        preview_container = QWidget()
+        preview_layout = QVBoxLayout(preview_container)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.addWidget(self.plot_label, 1)
+        self.preview_status = QLabel('')
+        self.preview_status.setWordWrap(True)
+        preview_layout.addWidget(self.preview_status)
+        main_layout.addWidget(preview_container, 1)
         self.connect_signals()
         self.on_mode_changed()
 
@@ -708,7 +890,29 @@ class GnuplotGUIY2Axis(QMainWindow):
         self.toggle_colorbar_options()
         return panel
 
+    def create_preview_settings_panel(self):
+        panel = QGroupBox("7. 高速プレビュー")
+        layout = QGridLayout(panel)
+        self.fast_preview_check = QCheckBox("プレビューのみ点数を減らす（推奨）")
+        self.fast_preview_check.setChecked(True)
+        layout.addWidget(self.fast_preview_check, 0, 0, 1, 2)
+        layout.addWidget(QLabel("プレビューの最大点数 / データファイル:"), 1, 0)
+        self.preview_max_points = QSpinBox()
+        self.preview_max_points.setRange(1000, 1000000)
+        self.preview_max_points.setSingleStep(5000)
+        self.preview_max_points.setValue(20000)
+        self.preview_max_points.setToolTip("100万点なら約2万点に間引いて描画。3D格子は行と走査線を間引きます。")
+        layout.addWidget(self.preview_max_points, 1, 1)
+        self.preview_notice = QLabel("PNG・PDF・SVG・GP・Cの出力は元の全点を使用します。")
+        self.preview_notice.setWordWrap(True)
+        layout.addWidget(self.preview_notice, 2, 0, 1, 2)
+        return panel
+
     def connect_signals(self, *args, **kwargs):
+        self.fast_preview_check.stateChanged.connect(
+            lambda: self.preview_max_points.setEnabled(self.fast_preview_check.isChecked()))
+        self.fast_preview_check.stateChanged.connect(self.request_redraw)
+        self.preview_max_points.valueChanged.connect(self.request_redraw)
         self.plot_mode_combo.currentIndexChanged.connect(self.on_mode_changed)
         self.add_as_vector_check.stateChanged.connect(self.update_column_input_ui)
         self.add_as_model_check.stateChanged.connect(lambda state: self.add_as_vector_check.setEnabled(not state))
@@ -843,7 +1047,17 @@ class GnuplotGUIY2Axis(QMainWindow):
             self.new_plot_file_input.setText(os.path.basename(file_name))
 
     def request_redraw(self, *args, **kwargs):
+        # 古いデータ準備と描画を即キャンセル。最後の操作の250ms後に再描画する。
+        self._preview_generation += 1
+        self._preview_cancel_event.set()
+        self._cancel_preview_process()
         self.update_timer.start(250)
+
+    def _cancel_preview_process(self):
+        process = self._preview_process
+        self._preview_process = None
+        if process is not None and process.state() != QProcess.NotRunning:
+            process.kill()
 
     def add_plot(self, *args, **kwargs):
         if not self.current_selected_file_path:
@@ -924,7 +1138,7 @@ class GnuplotGUIY2Axis(QMainWindow):
             editor.titleChanged.connect(lambda title, idx=i: self.plot_tabs.setTabText(idx, title))
         self.request_redraw()
 
-    def generate_gnuplot_script(self, output_path=None, terminal_cmd=None):
+    def generate_gnuplot_script(self, output_path=None, terminal_cmd=None, preview_paths=None):
         if not self.plots: return None
         if terminal_cmd: script = f"{terminal_cmd}\n"
         else:
@@ -1063,7 +1277,10 @@ class GnuplotGUIY2Axis(QMainWindow):
             else:
                 style_details += f' linecolor rgb "{style_info["color"]}"'
             
-            path_str = f'"{plot_info["path"]}" {using_str}'; title_str = f'title "{plot_info["title"]}"'
+            # 間引きデータに差し替えるのはプレビュー時だけ。通常のGP/画像出力は元ファイル。
+            plot_path = preview_paths.get(plot_info["path"], plot_info["path"]) if preview_paths else plot_info["path"]
+            plot_path = plot_path.replace('\\', '/')
+            path_str = f'"{plot_path}" {using_str}'; title_str = f'title "{plot_info["title"]}"' 
             
             part_str = ""
             if self.current_mode == '2d':
@@ -1120,28 +1337,119 @@ class GnuplotGUIY2Axis(QMainWindow):
         return script
 
     def redraw_plot(self, *args, **kwargs):
-        script = self.generate_gnuplot_script()
+        token = self._preview_generation
+        # Command Preview には常に元データを用いた完全なスクリプトを表示する。
+        try:
+            script = self.generate_gnuplot_script()
+        except Exception as exc:
+            self.preview_status.setText(f"設定エラー: {exc}")
+            return
         if not script:
+            self._last_preview_pixmap = QPixmap()
+            self.plot_label.setPixmap(QPixmap())
             self.plot_label.setText("Please add a plot to begin.")
+            self.preview_status.clear()
             self.script_display.clear()
             self.script_display.setFixedHeight(30)
             return
         self.script_display.setText(script)
         new_height = int(self.script_display.document().size().height()) + 15
         self.script_display.setFixedHeight(new_height)
+
+        if not self.fast_preview_check.isChecked():
+            self.preview_status.setText("全点を使って描画中（設定変更は引き続き可能です）...")
+            self._start_preview_process(token, script)
+            return
+
+        # 元データを編集せず、一度だけ作った間引きデータをキャッシュして再利用する。
+        self.preview_status.setText("プレビュー用データを準備中...")
+        self._preview_cancel_event = threading.Event()
+        filenames = list(dict.fromkeys(p['path'] for p in self.plots))
+        task = PreviewDataTask(
+            self._preview_cache, filenames, self.preview_max_points.value(),
+            self.current_mode == '3d', token, self._preview_cancel_event
+        )
+        task.signals.finished.connect(self._preview_data_ready)
+        self._preview_pool.start(task)
+
+    def _preview_data_ready(self, token, replacements, error):
+        if token != self._preview_generation:
+            return
+        if error:
+            self.preview_status.setText(f"プレビュー用データの準備に失敗: {error}")
+            return
         try:
-            process = subprocess.Popen(['gnuplot'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=CREATE_NO_WINDOW)
-            stdout_data, stderr_data = process.communicate(script.encode('utf-8'))
-            if process.returncode != 0:
-                self.plot_label.setText(f"Gnuplot Error:\n{stderr_data.decode('utf-8', 'ignore')}")
-                return
-            pixmap = QPixmap()
-            if pixmap.loadFromData(stdout_data):
-                self.plot_label.setPixmap(pixmap.scaled(self.plot_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            else:
-                self.plot_label.setText("Failed to load image from Gnuplot.")
-        except Exception as e:
-            self.plot_label.setText(f"Runtime Error:\n{e}")
+            script = self.generate_gnuplot_script(preview_paths=replacements)
+        except Exception as exc:
+            self.preview_status.setText(f"設定エラー: {exc}")
+            return
+        self.preview_status.setText("高速プレビューを描画中...")
+        self._start_preview_process(token, script)
+
+    def _start_preview_process(self, token, script):
+        if token != self._preview_generation:
+            return
+        # QProcess は非同期。100万点でもプロセスの終了待ちでGUIが止まらない。
+        process = QProcess(self)
+        self._preview_process = process
+        output = bytearray()
+        errors = bytearray()
+
+        def read_output():
+            output.extend(bytes(process.readAllStandardOutput()))
+
+        def read_error():
+            errors.extend(bytes(process.readAllStandardError()))
+
+        def send_script():
+            process.write(script.encode('utf-8'))
+            process.closeWriteChannel()
+
+        def finished(exit_code, exit_status):
+            read_output()
+            read_error()
+            if self._preview_process is process:
+                self._preview_process = None
+            if token == self._preview_generation:
+                if exit_status != QProcess.NormalExit or exit_code != 0:
+                    message = errors.decode('utf-8', 'replace').strip() or f"exit code: {exit_code}"
+                    self.preview_status.setText(f"Gnuplot Error: {message[:1000]}")
+                else:
+                    pixmap = QPixmap()
+                    if pixmap.loadFromData(bytes(output)):
+                        self._last_preview_pixmap = pixmap
+                        self._show_last_preview()
+                        self.preview_status.setText(
+                            f"高速プレビュー（最大{self.preview_max_points.value():,}点/ファイル）"
+                            if self.fast_preview_check.isChecked() else "全点プレビュー")
+                    else:
+                        message = errors.decode('utf-8', 'replace').strip()
+                        self.preview_status.setText(
+                            f"Gnuplotの画像を読み込めませんでした。{message[:500]}")
+            process.deleteLater()
+
+        def failed(error):
+            if error == QProcess.FailedToStart:
+                if self._preview_process is process:
+                    self._preview_process = None
+                if token == self._preview_generation:
+                    self.preview_status.setText("Gnuplotを起動できません。PATHとインストールを確認してください。")
+                process.deleteLater()
+
+        process.readyReadStandardOutput.connect(read_output)
+        process.readyReadStandardError.connect(read_error)
+        process.started.connect(send_script)
+        process.finished.connect(finished)
+        process.errorOccurred.connect(failed)
+        process.start('gnuplot')
+
+    def _show_last_preview(self):
+        if not self._last_preview_pixmap.isNull():
+            size = self.plot_label.size()
+            if size.width() > 0 and size.height() > 0:
+                scaled = self._last_preview_pixmap.scaled(
+                    size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.plot_label.setPixmap(scaled)
 
     def save_image(self, *args, **kwargs):
         if not self.plots:
@@ -1336,6 +1644,7 @@ class GnuplotGUIY2Axis(QMainWindow):
             'zaxis': {'label': self.zlabel_input.text(), 'range_check': self.zrange_check.isChecked(), 'range_min': self.zrange_min.text(), 'range_max': self.zrange_max.text(), 'tics_check': self.ztics_check.isChecked(), 'tics_xoffset': self.ztics_xoffset.text(), 'tics_yoffset': self.ztics_yoffset.text(), 'log_check': self.logscale_z_check.isChecked()},
             'view3d': {'rot_x': self.view_rot_x_slider.value(), 'rot_z': self.view_rot_z_slider.value(), 'pm3d_check': self.pm3d_check.isChecked(), 'xyplane_check': self.xyplane_check.isChecked(), 'xyplane_value': self.xyplane_input.text()}, # Added xyplane
             'output': {'width': self.width_input.text(), 'height': self.height_input.text(), 'font_name': self.font_combo.currentText(), 'font_size': self.font_slider.value()},
+            'preview': {'fast': self.fast_preview_check.isChecked(), 'max_points': self.preview_max_points.value()},
             'colorbar': {'check': self.colorbar_check.isChecked(), 'label': self.cblabel_input.text(), 'format_10_power': self.cb_format_10_power_check.isChecked(), 'range_check': self.cbrange_check.isChecked(), 'range_min': self.cbrange_min.text(), 'range_max': self.cbrange_max.text(), 'size_check': self.cbsize_check.isChecked(), 'origin_x': self.cb_origin_x_spinbox.value(), 'origin_y': self.cb_origin_y_spinbox.value(), 'size_w': self.cb_size_w_spinbox.value(), 'size_h': self.cb_size_h_spinbox.value()}
         }
         return settings
@@ -1361,6 +1670,7 @@ class GnuplotGUIY2Axis(QMainWindow):
             s = settings.get('zaxis', {}); self.zlabel_input.setText(s.get('label', 'Z-Axis')); self.zrange_check.setChecked(s.get('range_check', False)); self.zrange_min.setText(s.get('range_min', '')); self.zrange_max.setText(s.get('range_max', '')); self.ztics_check.setChecked(s.get('tics_check', False)); self.ztics_xoffset.setText(s.get('tics_xoffset', '0')); self.ztics_yoffset.setText(s.get('tics_yoffset', '0')); self.logscale_z_check.setChecked(s.get('log_check', False))
             s = settings.get('view3d', {}); self.view_rot_x_slider.setValue(s.get('rot_x', 60)); self.view_rot_z_slider.setValue(s.get('rot_z', 30)); self.pm3d_check.setChecked(s.get('pm3d_check', True)); self.xyplane_check.setChecked(s.get('xyplane_check', False)); self.xyplane_input.setText(s.get('xyplane_value', '0')); self.xyplane_input.setEnabled(self.xyplane_check.isChecked()) # Added xyplane
             s = settings.get('output', {}); self.width_input.setText(s.get('width', '800')); self.height_input.setText(s.get('height', '600')); self.font_combo.setCurrentText(s.get('font_name', 'Times New Roman')); self.font_slider.setValue(s.get('font_size', 14))
+            s = settings.get('preview', {}); self.fast_preview_check.setChecked(s.get('fast', True)); self.preview_max_points.setValue(s.get('max_points', 20000)); self.preview_max_points.setEnabled(self.fast_preview_check.isChecked())
             s = settings.get('colorbar', {}); self.colorbar_check.setChecked(s.get('check', True)); self.cblabel_input.setText(s.get('label', 'Magnitude')); self.cb_format_10_power_check.setChecked(s.get('format_10_power', False)); self.cbrange_check.setChecked(s.get('range_check', False)); self.cbrange_min.setText(s.get('range_min', '')); self.cbrange_max.setText(s.get('range_max', '')); self.cbsize_check.setChecked(s.get('size_check', False)); self.cb_origin_x_spinbox.setValue(s.get('origin_x', 0.92)); self.cb_origin_y_spinbox.setValue(s.get('origin_y', 0.1)); self.cb_size_w_spinbox.setValue(s.get('size_w', 0.04)); self.cb_size_h_spinbox.setValue(s.get('size_h', 0.8)); self.toggle_colorbar_options()
             loaded_plots = settings.get('plots', [])
             for i, plot_info in enumerate(loaded_plots):
@@ -1416,6 +1726,9 @@ class GnuplotGUIY2Axis(QMainWindow):
                 print(f"Failed to auto-load settings: {e}")
 
     def clear_all_plots(self, *args, **kwargs):
+        self._preview_generation += 1
+        self._preview_cancel_event.set()
+        self._cancel_preview_process()
         self.plot_tabs.blockSignals(True)
         while self.plot_tabs.count() > 0: self.plot_tabs.removeTab(0)
         self.plots.clear()
@@ -1423,7 +1736,21 @@ class GnuplotGUIY2Axis(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if self.plots: self.request_redraw()
+        # ウィンドウのサイズ変更だけで再計算せず、描画済みの画像を拡縮する。
+        if hasattr(self, 'plot_label'):
+            QTimer.singleShot(0, self._show_last_preview)
+
+    def closeEvent(self, event):
+        self.update_timer.stop()
+        self._preview_generation += 1
+        self._preview_cancel_event.set()
+        process = self._preview_process
+        self._cancel_preview_process()
+        if process is not None and process.state() != QProcess.NotRunning:
+            process.waitForFinished(1000)  # 終了時だけプロセスの停止を確認
+        self._preview_pool.waitForDone()
+        self._preview_tempdir.cleanup()
+        super().closeEvent(event)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
